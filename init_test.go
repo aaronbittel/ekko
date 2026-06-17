@@ -11,13 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInitCommand(t *testing.T) {
+func TestInitRepo(t *testing.T) {
 	dir := t.TempDir()
 	os.Chdir(dir)
 
 	var sb strings.Builder
 
-	err := init_(&sb)
+	err := initRepo(&sb)
 	assert.NoError(t, err)
 
 	wantRelGitPaths := []string{

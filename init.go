@@ -9,13 +9,20 @@ import (
 	"strings"
 )
 
-func init_(w io.Writer, args ...string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
+func init_(fs *flag.FlagSet, w io.Writer, args ...string) error {
+	fs.Usage = func() {
+		fmt.Fprintf(w, "ekko-init - Create an empty Git repository")
+		fs.PrintDefaults()
+	}
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
+	return initRepo(w)
+}
+
+func initRepo(w io.Writer) error {
 	paths := []string{
 		"HEAD",
 		"branches/",
