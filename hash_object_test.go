@@ -73,7 +73,7 @@ func TestHashObject(t *testing.T) {
 func TestBuildObjData(t *testing.T) {
 	t.Run("blob", func(t *testing.T) {
 		r := strings.NewReader("test content\n")
-		got, err := buildObjData(r, typeBlob)
+		got, err := buildObjectData(r, typeBlob)
 		assert.NoError(t, err)
 		want := "blob 13\x00test content\n"
 		assert.Equal(t, want, string(got))
@@ -81,13 +81,13 @@ func TestBuildObjData(t *testing.T) {
 
 	for _, typ := range []string{typeCommit, typeTree, typeTag} {
 		t.Run(typ, func(t *testing.T) {
-			_, err := buildObjData(strings.NewReader(""), typ)
+			_, err := buildObjectData(strings.NewReader(""), typ)
 			assert.ErrorContains(t, err, fmt.Sprintf("object type %q is not supported yet", typ))
 		})
 	}
 
 	t.Run("unknown", func(t *testing.T) {
-		_, err := buildObjData(strings.NewReader(""), "unknown")
+		_, err := buildObjectData(strings.NewReader(""), "unknown")
 		assert.Error(t, err)
 		assert.Equal(t, err.Error(), "invalid object type \"unknown\"")
 	})

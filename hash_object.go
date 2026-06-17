@@ -21,19 +21,19 @@ const (
 	typeTag    = "tag"
 )
 
-func runHashObject(r io.Reader, gitObjType string, writeObj bool) (objID []byte, err error) {
-	objData, err := buildObjData(r, gitObjType)
+func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectID []byte, err error) {
+	objectData, err := buildObjectData(r, gitObjectType)
 	if err != nil {
 		return nil, err
 	}
 
-	hash := sha1.Sum(objData)
-	objID = hash[:]
+	hash := sha1.Sum(objectData)
+	objectID = hash[:]
 
-	if writeObj {
-		objIDStr := hex.EncodeToString(objID)
-		dirname := objIDStr[:2]
-		filename := objIDStr[2:]
+	if writeObject {
+		objectIDStr := hex.EncodeToString(objectID)
+		dirname := objectIDStr[:2]
+		filename := objectIDStr[2:]
 
 		dirpath := filepath.Join(".git", "objects", dirname)
 		if err := os.Mkdir(dirpath, 0777); err != nil {
@@ -50,10 +50,10 @@ func runHashObject(r io.Reader, gitObjType string, writeObj bool) (objID []byte,
 
 		zr := zlib.NewWriter(f)
 		defer zr.Close()
-		zr.Write(objData)
+		zr.Write(objectData)
 	}
 
-	return objID, nil
+	return objectID, nil
 }
 
 func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
@@ -63,9 +63,9 @@ func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
 	}
 
 	var (
-		gitObjType = typeBlob
-		useStdin   bool
-		writeObj   bool
+		gitObjectType = typeBlob
+		useStdin      bool
+		writeObject   bool
 	)
 
 	fs.Func("t", "Specify the type of object to be created (default: \"blob\"). Possible values are commit, tree, blob, and tag.", func(typ string) error {
@@ -73,12 +73,12 @@ func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
 		if idx := slices.Index(validTypes, typ); idx == -1 {
 			return fmt.Errorf("invalid object type %q", typ)
 		} else {
-			gitObjType = validTypes[idx]
+			gitObjectType = validTypes[idx]
 			return nil
 		}
 	})
 	fs.BoolVar(&useStdin, "stdin", false, "Read the object from standard input instead of from a file.")
-	fs.BoolVar(&writeObj, "w", false, "Actually write the object into the object database.")
+	fs.BoolVar(&writeObject, "w", false, "Actually write the object into the object database.")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -102,16 +102,16 @@ func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
 		}
 	}
 
-	objID, err := runHashObject(r, gitObjType, writeObj)
+	objectID, err := runHashObject(r, gitObjectType, writeObject)
 	if err != nil {
 		return err
 	}
 
-	fmt.Fprintf(w, "%x\n", objID)
+	fmt.Fprintf(w, "%x\n", objectID)
 	return nil
 }
 
-func buildObjData(r io.Reader, objType string) ([]byte, error) {
+func buildObjectData(r io.Reader, objectType string) ([]byte, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
@@ -119,14 +119,14 @@ func buildObjData(r io.Reader, objType string) ([]byte, error) {
 
 	var buf bytes.Buffer
 
-	switch objType {
+	switch objectType {
 	case typeBlob:
 		fmt.Fprintf(&buf, "blob %d\x00", len(data))
 		buf.Write(data)
 	case typeCommit, typeTree, typeTag:
-		return nil, fmt.Errorf("object type %q is not supported yet", objType)
+		return nil, fmt.Errorf("object type %q is not supported yet", objectType)
 	default:
-		return nil, fmt.Errorf("invalid object type %q", objType)
+		return nil, fmt.Errorf("invalid object type %q", objectType)
 	}
 
 	return buf.Bytes(), nil
