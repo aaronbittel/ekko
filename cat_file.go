@@ -9,126 +9,167 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 )
 
-var (
-	ErrBadFile = errors.New("bad file")
-
-	blobStart = []byte("blob ")
-	nullByte  = []byte{0x00}
-)
+var ErrBadFile = errors.New("bad file")
 
 func catFile(fs *flag.FlagSet, w io.Writer, args ...string) error {
 	fs.Usage = func() {
-		fmt.Fprintf(w, "ekko-cat-file - Provide contents or details of repository objects")
+		fmt.Fprintf(w, "ekko-cat-file - Provide contents or details of repository objects\n\n")
 		fs.PrintDefaults()
 	}
 
 	var (
 		prettyPrint bool
+		showType    bool
 	)
 
 	fs.BoolVar(&prettyPrint, "p", false, "Pretty-print the contents of <object> based on its type.")
+	fs.BoolVar(&showType, "t", false, "Instead of the content, show the object type identified by <object>.")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
+	if prettyPrint && showType {
+		return fmt.Errorf("-p and -t are mutually exclusive")
+	}
+
 	var (
-		content []byte
-		err     error
+		expectedType string
+		objectName   string
 	)
 
 	if prettyPrint {
-		object := fs.Arg(0)
-		_ = object
-		return fmt.Errorf("\"-p\" is not implemented yet")
+		objectName = fs.Arg(0)
+		if objectName == "" {
+			fs.Usage()
+			return fmt.Errorf("missing object name")
+		}
+	} else if showType {
+		objectName = fs.Arg(0)
+		if objectName == "" {
+			fs.Usage()
+			return fmt.Errorf("missing object name")
+		}
 	} else {
-		objectType := fs.Arg(0)
-		object := fs.Arg(1)
-
-		content, err = runCatFile(objectType, object)
-		if err != nil {
-			return fmt.Errorf("ekko cat-file: %s: %v", object, err)
+		expectedType = fs.Arg(0)
+		objectName = fs.Arg(1)
+		if expectedType == "" || objectName == "" {
+			fs.Usage()
+			return fmt.Errorf("missing object name or expected object type")
 		}
 	}
 
-	fmt.Fprint(w, string(content))
+	gitRepo, err := findGitRepo()
+	if err != nil {
+		return err
+	}
+
+	objectType, data, err := loadGitObject(gitRepo, objectName)
+	if err != nil {
+		return err
+	}
+
+	if showType {
+		fmt.Fprintln(w, objectType)
+		return nil
+	}
+
+	if !prettyPrint && objectType != expectedType {
+		return fmt.Errorf("expected object type %q, got %q", expectedType, objectType)
+	}
+
+	content, err := runCatFile(objectType, data)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprint(w, content)
 
 	return nil
 }
 
-func runCatFile(objectType, objectID string) ([]byte, error) {
-	path, err := getObjectPath(objectID)
+func loadGitObject(gitRepo, objectName string) (objectType, content string, err error) {
+	path, err := getObjectPath(gitRepo, objectName)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 	defer f.Close()
 
-	data, err := readObjectData(objectID, f)
+	content, err = decompressObject(f)
 	if err != nil {
-		return nil, err
+		return "", "", err
 	}
 
-	return parseObject(objectType, data)
+	return getObjectType(content)
 }
 
-func readObjectData(objectID string, r io.Reader) ([]byte, error) {
-	zr, err := zlib.NewReader(r)
-	if err != nil {
-		return nil, err
-	}
-	buf := new(bytes.Buffer)
-
-	io.Copy(buf, zr)
-	if err := zr.Close(); err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
-}
-
-func parseObject(objectType string, data []byte) ([]byte, error) {
+func runCatFile(objectType, content string) (string, error) {
 	switch objectType {
 	case typeBlob:
-		if content, err := readBlob(data); err != nil {
-			return content, err
-		} else {
-			return content, nil
-		}
-	case typeCommit, typeTree, typeTag:
-		return nil, fmt.Errorf("type %q is not supported yet", objectType)
+		return readBlob(content)
+	case typeTree:
+		fallthrough
+	case typeTag:
+		fallthrough
+	case typeCommit:
+		return "", fmt.Errorf("%s not implemented yet", objectType)
 	default:
-		return nil, fmt.Errorf("invalid object type %q", objectType)
+		panic("unreachable")
 	}
 }
 
-func readBlob(buf []byte) ([]byte, error) {
-	if len(buf) < len(blobStart) || !bytes.Equal(buf[:len(blobStart)], blobStart) {
-		return nil, ErrBadFile
-	}
-	buf = buf[len(blobStart):]
-
-	idx := bytes.Index(buf, nullByte)
-	if idx == -1 {
-		return nil, ErrBadFile
+func getObjectType(content string) (typ, rest string, err error) {
+	typ, rest, found := strings.Cut(content, " ")
+	if !found {
+		return "", "", ErrBadFile
 	}
 
-	size, err := strconv.Atoi(string(buf[:idx]))
+	switch typ {
+	case typeBlob, typeTree, typeTag, typeCommit:
+		return typ, rest, nil
+	default:
+		return "", "", fmt.Errorf("unknown object info %q", typ)
+	}
+}
+
+func decompressObject(r io.Reader) (string, error) {
+	zr, err := zlib.NewReader(r)
 	if err != nil {
-		return nil, ErrBadFile
+		return "", err
+	}
+	defer zr.Close()
+
+	buf := new(bytes.Buffer)
+
+	if _, err := io.Copy(buf, zr); err != nil {
+		return "", err
 	}
 
-	buf = buf[idx+1:]
+	return buf.String(), nil
+}
 
-	if len(buf) != size {
-		return nil, ErrBadFile
+func readBlob(content string) (string, error) {
+	sizeStr, rest, found := strings.Cut(content, "\x00")
+	if !found {
+		return "", ErrBadFile
 	}
 
-	return buf, nil
+	size, err := strconv.Atoi(sizeStr)
+	if err != nil {
+		return "", ErrBadFile
+	}
+
+	if len(rest) != size {
+		return "", ErrBadFile
+	}
+
+	return rest, nil
 }
