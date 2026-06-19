@@ -331,13 +331,6 @@ func updateIndex(fs *flag.FlagSet, w io.Writer, args ...string) error {
 }
 
 func runUpdateIndex(path string, cinfo *cacheinfo) error {
-	gitRepo, err := findGitRepo()
-	if err != nil {
-		return err
-	}
-
-	indexPath := filepath.Join(gitRepo, "index")
-
 	var entry *indexEntry
 
 	if cinfo != nil {
@@ -353,7 +346,34 @@ func runUpdateIndex(path string, cinfo *cacheinfo) error {
 		}
 	}
 
-	out := buildIndexFile([]*indexEntry{entry})
+	gitRepo, err := findGitRepo()
+	if err != nil {
+		return err
+	}
+
+	indexPath := filepath.Join(gitRepo, "index")
+	var entries []*indexEntry
+	_, err = os.Stat(indexPath)
+	switch {
+	case err == nil:
+		// index file exists
+		data, err := os.ReadFile(indexPath)
+		if err != nil {
+			return err
+		}
+		entries, err = readIndex(data)
+		if err != nil {
+			return err
+		}
+	case os.IsNotExist(err):
+		entries = []*indexEntry{}
+	default:
+		return err
+	}
+
+	entries = append(entries, entry)
+
+	out := buildIndexFile(entries)
 	if err := os.WriteFile(indexPath, out, 0755); err != nil {
 		return err
 	}
