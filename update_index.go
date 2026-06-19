@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
 	"encoding/hex"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 )
@@ -17,12 +19,12 @@ import (
 // The signature is { 'D', 'I', 'R', 'C' } (stands for "dircache")
 var indexSignature = [4]byte{'D', 'I', 'R', 'C'}
 
-type version [4]byte
+type version uint32
 
 var (
-	version2 = [4]byte{0, 0, 0, 2}
-	version3 = [4]byte{0, 0, 0, 3} //lint:ignore U1000 currently unused, but here for documentation
-	version4 = [4]byte{0, 0, 0, 4} //lint:ignore U1000 currently unused, but here for documentation
+	version2 = version(2)
+	version3 = version(3) //lint:ignore U1000 currently unused, but here for documentation
+	version4 = version(4) //lint:ignore U1000 currently unused, but here for documentation
 )
 
 type indexHeader struct {
@@ -44,9 +46,32 @@ func NewIndexHeader(version version, entryCount uint32) *indexHeader {
 func (ih *indexHeader) Encode() []byte {
 	out := make([]byte, 0, 12)
 	out = append(out, ih.signature[:]...)
-	out = append(out, ih.version[:]...)
+	out = binary.BigEndian.AppendUint32(out, uint32(ih.version))
 	out = binary.BigEndian.AppendUint32(out, ih.entryCount)
 	return out
+}
+
+var ErrInvalidIndexHeader = errors.New("illegal index header format")
+
+func (ih *indexHeader) Decode(b []byte) error {
+	if len(b) < 12 {
+		return fmt.Errorf("%w: header must be 12 bytes long", ErrInvalidIndexHeader)
+	}
+
+	if !bytes.Equal(indexSignature[:], b[:4]) {
+		return fmt.Errorf("%w: bad index signature", ErrInvalidIndexHeader)
+	}
+	copy(ih.signature[:], b[:4])
+
+	ver := version(binary.BigEndian.Uint32(b[4:8]))
+	if ver != version2 {
+		return fmt.Errorf("%w: expect version 2", ErrInvalidIndexHeader)
+	}
+	ih.version = ver
+
+	ih.entryCount = binary.BigEndian.Uint32(b[8:12])
+
+	return nil
 }
 
 type indexEntry struct {
@@ -65,7 +90,7 @@ type indexEntry struct {
 	gitSha gitSha1
 
 	flags entryFlags
-	// assume 0 for simple version 2
+	// always 0 for version 2 => omitted
 	extendedFlags uint16
 
 	// Entry path name (variable length) relative to top level directory (without
@@ -156,7 +181,7 @@ func isSymbolicLink(statMode uint32) bool {
 	return (statMode & syscall.S_IFMT) == syscall.S_IFLNK
 }
 
-func (ie indexEntry) Encode() []byte {
+func (ie *indexEntry) Encode() []byte {
 	// 11 * 4 (11 4byte fields, 20 (sha1), +8 max padding)
 	out := make([]byte, 0, 11*4+20+len(ie.path)+8)
 	out = binary.BigEndian.AppendUint32(out, ie.ctime.seconds)
@@ -171,8 +196,8 @@ func (ie indexEntry) Encode() []byte {
 	out = binary.BigEndian.AppendUint32(out, ie.fileSize)
 	out = append(out, ie.gitSha[:]...)
 	out = binary.BigEndian.AppendUint16(out, uint16(ie.flags))
-	// extendedFlags can be omitted if empty
-	if ie.extendedFlags != 0 {
+	// extendedFlags always omitted in version 2
+	if ie.shouldSetExtendedFlags() {
 		out = binary.BigEndian.AppendUint16(out, uint16(ie.extendedFlags))
 	}
 	out = append(out, []byte(ie.path)...)
@@ -181,6 +206,47 @@ func (ie indexEntry) Encode() []byte {
 	out = append(out, padding...)
 
 	return out
+}
+
+func (ie *indexEntry) Decode(b []byte) (n int, err error) {
+	parser := &parser{data: b}
+
+	ie.ctime.seconds = binary.BigEndian.Uint32(parser.readN(4))
+	ie.ctime.nanoseconds = binary.BigEndian.Uint32(parser.readN(4))
+	ie.mtime.seconds = binary.BigEndian.Uint32(parser.readN(4))
+	ie.mtime.nanoseconds = binary.BigEndian.Uint32(parser.readN(4))
+	ie.device = binary.BigEndian.Uint32(parser.readN(4))
+	ie.inode = binary.BigEndian.Uint32(parser.readN(4))
+	ie.mode = gitMode(binary.BigEndian.Uint32(parser.readN(4)))
+	ie.userID = binary.BigEndian.Uint32(parser.readN(4))
+	ie.groupID = binary.BigEndian.Uint32(parser.readN(4))
+	ie.fileSize = binary.BigEndian.Uint32(parser.readN(4))
+	copy(ie.gitSha[:], parser.readN(20))
+	ie.flags = entryFlags(binary.BigEndian.Uint16(parser.readN(2)))
+
+	filenameLen := ie.filenameLength()
+	if filenameLen == 0x0FFF {
+		panic("index entry with filename length > 0x0FFF is not supported yet")
+	}
+
+	ie.path = string(parser.readN(filenameLen))
+
+	entryLen := 10*4 + 20 + 2 + filenameLen
+	expectedPaddingLen := padding(entryLen)
+
+	if !bytes.Equal(make([]byte, expectedPaddingLen), parser.readN(expectedPaddingLen)) {
+		return 0, ErrMalformedIndexFile
+	}
+
+	return entryLen + expectedPaddingLen, nil
+}
+
+func (ie indexEntry) shouldSetExtendedFlags() bool {
+	return (ie.flags & 0x4000) != 0
+}
+
+func (ie indexEntry) filenameLength() int {
+	return int(ie.flags & 0x0FFF)
 }
 
 // 1-8 nul bytes as necessary to pad the entry to a multiple of eight bytes
@@ -295,6 +361,54 @@ func runUpdateIndex(path string, cinfo *cacheinfo) error {
 	return nil
 }
 
+var ErrMalformedIndexFile = errors.New("malformed index file")
+
+func readIndex(b []byte) ([]*indexEntry, error) {
+	body := b[:len(b)-20]
+	indexHash := b[len(b)-20:]
+
+	expectedHash := sha1.Sum(body)
+	if !bytes.Equal(expectedHash[:], indexHash) {
+		return nil, fmt.Errorf("%w: malformed index file hash", ErrMalformedIndexFile)
+	}
+
+	parser := &parser{data: b}
+
+	var header indexHeader
+	if err := header.Decode(parser.readN(12)); err != nil {
+		return nil, err
+	}
+
+	indexEntries := make([]*indexEntry, 0, header.entryCount)
+
+	for range header.entryCount {
+		var entry indexEntry
+		n, err := entry.Decode(parser.current())
+		if err != nil {
+			return nil, err
+		}
+		indexEntries = append(indexEntries, &entry)
+		parser.off += n
+	}
+
+	return indexEntries, nil
+}
+
+type parser struct {
+	data []byte
+	off  int
+}
+
+func (p *parser) readN(n int) []byte {
+	b := p.data[p.off : p.off+n]
+	p.off += n
+	return b
+}
+
+func (p *parser) current() []byte {
+	return p.data[p.off:]
+}
+
 func buildIndexEntry(path string, stat *syscall.Stat_t) (*indexEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -322,8 +436,12 @@ func buildIndexEntryFromCacheinfo(cinfo *cacheinfo) *indexEntry {
 }
 
 func buildIndexFile(entries []*indexEntry) []byte {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].path < entries[j].path
+	})
+
 	out := make([]byte, 0, 1024)
-	out = append(out, NewIndexHeader(version2, 1).Encode()...)
+	out = append(out, NewIndexHeader(version2, uint32(len(entries))).Encode()...)
 
 	for _, entry := range entries {
 		out = append(out, entry.Encode()...)

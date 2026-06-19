@@ -9,9 +9,55 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestIndexEntryEncodingRoundtrip(t *testing.T) {
+	t.Run("single index entry", func(t *testing.T) {
+		entry := newTestIndexEntry(t, "test.txt")
+		encoded := entry.Encode()
+
+		var got indexEntry
+		_, err := got.Decode(encoded)
+		require.NoError(t, err)
+		assert.Equal(t, *entry, got)
+	})
+
+	t.Run("multiple index entries", func(t *testing.T) {
+		indexEntries := []*indexEntry{
+			newTestIndexEntry(t, "test.txt"),
+			newTestIndexEntry(t, "zxy.bin"),
+		}
+		encoded := buildIndexFile(indexEntries)
+
+		gotIndexEntries, err := readIndex(encoded)
+		require.NoError(t, err)
+		assert.Equal(t, indexEntries, gotIndexEntries)
+	})
+
+	t.Run("sort entries by filename", func(t *testing.T) {
+		inputEntries := []*indexEntry{
+			newTestIndexEntry(t, "zzzzzzzz"),
+			newTestIndexEntry(t, "tttt"),
+			newTestIndexEntry(t, "aaaaaaaaaaaaaaaaaaaaaaa"),
+			newTestIndexEntry(t, "ffffffffffff"),
+		}
+
+		want := []*indexEntry{
+			newTestIndexEntry(t, "aaaaaaaaaaaaaaaaaaaaaaa"),
+			newTestIndexEntry(t, "ffffffffffff"),
+			newTestIndexEntry(t, "tttt"),
+			newTestIndexEntry(t, "zzzzzzzz"),
+		}
+
+		encoded := buildIndexFile(inputEntries)
+
+		got, err := readIndex(encoded)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	})
+}
+
 // TODO: make this less brittle, if I want to add more tests
 func TestBuildIndexFile(t *testing.T) {
-	entries := []*indexEntry{newTestIndexEntry(t)}
+	entries := []*indexEntry{newTestIndexEntry(t, "test.txt")}
 
 	got := buildIndexFile(entries)
 
@@ -154,7 +200,7 @@ func TestWriteIndexEntry(t *testing.T) {
 	}
 }
 
-func newTestIndexEntry(t *testing.T) *indexEntry {
+func newTestIndexEntry(t *testing.T, filename string) *indexEntry {
 	return &indexEntry{
 		ctime:         gitTimestamp{seconds: 7777, nanoseconds: 6666},
 		mtime:         gitTimestamp{seconds: 5555, nanoseconds: 4444},
@@ -165,9 +211,9 @@ func newTestIndexEntry(t *testing.T) *indexEntry {
 		groupID:       9876,
 		fileSize:      10,
 		gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
-		flags:         0x0008,
+		flags:         entryFlags(len(filename)),
 		extendedFlags: 0,
-		path:          "test.txt",
+		path:          filename,
 	}
 }
 
