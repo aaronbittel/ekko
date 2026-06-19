@@ -52,7 +52,7 @@ func initRepo(w io.Writer) error {
 				return err
 			}
 		} else {
-			if _, err := os.Create(p); err != nil {
+			if err := os.WriteFile(p, nil, 0664); err != nil {
 				return err
 			}
 		}
