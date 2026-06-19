@@ -33,6 +33,8 @@ func main() {
 		err = hashObject(newFlagSet("hash-object"), os.Stdout, subArgs...)
 	case "cat-file":
 		err = catFile(newFlagSet("cat-file"), os.Stdout, subArgs...)
+	case "update-index":
+		err = updateIndex(newFlagSet("update-index"), os.Stdout, subArgs...)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command - %q\n", os.Args[1])
 		os.Exit(1)

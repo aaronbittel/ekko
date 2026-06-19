@@ -21,41 +21,6 @@ const (
 	typeTag    = "tag"
 )
 
-func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectID []byte, err error) {
-	objectData, err := buildObjectData(r, gitObjectType)
-	if err != nil {
-		return nil, err
-	}
-
-	hash := sha1.Sum(objectData)
-	objectID = hash[:]
-
-	if writeObject {
-		objectIDStr := hex.EncodeToString(objectID)
-		dirname := objectIDStr[:2]
-		filename := objectIDStr[2:]
-
-		dirpath := filepath.Join(".git", "objects", dirname)
-		if err := os.Mkdir(dirpath, 0777); err != nil {
-			return nil, err
-		}
-
-		filepath := filepath.Join(dirpath, filename)
-
-		f, err := os.Create(filepath)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-
-		zr := zlib.NewWriter(f)
-		defer zr.Close()
-		zr.Write(objectData)
-	}
-
-	return objectID, nil
-}
-
 func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
 	fs.Usage = func() {
 		fmt.Fprintf(w, "ekko-hash-object - Compute object ID and optionally create an object from a file\n\n")
@@ -109,6 +74,50 @@ func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
 
 	fmt.Fprintf(w, "%x\n", objectID)
 	return nil
+}
+
+func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectID []byte, err error) {
+	objectData, err := buildObjectData(r, gitObjectType)
+	if err != nil {
+		return nil, err
+	}
+
+	hash := sha1.Sum(objectData)
+	objectID = hash[:]
+
+	if writeObject {
+		objectIDStr := hex.EncodeToString(objectID)
+		dirname := objectIDStr[:2]
+		filename := objectIDStr[2:]
+
+		dirpath := filepath.Join(".git", "objects", dirname)
+		if err := os.Mkdir(dirpath, 0777); err != nil {
+			return nil, err
+		}
+
+		filepath := filepath.Join(dirpath, filename)
+
+		f, err := os.Create(filepath)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+
+		zr := zlib.NewWriter(f)
+		defer zr.Close()
+		zr.Write(objectData)
+	}
+
+	return objectID, nil
+}
+
+func computeObjectHash(path, objectType string, r io.Reader) (gitSha1, error) {
+	data, err := buildObjectData(r, objectType)
+	if err != nil {
+		return gitSha1{}, err
+	}
+
+	return sha1.Sum(data), nil
 }
 
 func buildObjectData(r io.Reader, objectType string) ([]byte, error) {
