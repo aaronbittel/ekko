@@ -3,12 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 )
 
 type Command interface {
 	Name() string
 	Description() string
+	Run(w io.Writer, args ...string) error
 }
 
 func main() {
@@ -16,18 +18,12 @@ func main() {
 	help := root.Bool("h", false, "show help")
 	root.Parse(os.Args[1:])
 
-	initCmd := NewInitCmd(newFlagSet("init"))
-	hashObjectCmd := NewHashObjectCmd(newFlagSet("hash-object"))
-	catFileCmd := NewCatFileCmd(newFlagSet("cat-file"))
-	updateIndexCmd := NewUpdateIndexCmd(newFlagSet("update-index"))
-	statusCmd := NewStatusCmd(newFlagSet("status"))
-
 	commands := []Command{
-		initCmd,
-		statusCmd,
-		hashObjectCmd,
-		catFileCmd,
-		updateIndexCmd,
+		NewInitCmd(newFlagSet("init")),
+		NewHashObjectCmd(newFlagSet("hash-object")),
+		NewCatFileCmd(newFlagSet("cat-file")),
+		NewUpdateIndexCmd(newFlagSet("update-index")),
+		NewStatusCmd(newFlagSet("status")),
 	}
 
 	if *help {
@@ -36,34 +32,30 @@ func main() {
 	}
 
 	args := root.Args()
+
 	if len(args) == 0 {
 		usage(commands)
 		os.Exit(1)
 	}
 
-	var err error
+	var (
+		cmd     = args[0]
+		subArgs = args[1:]
+	)
 
-	subArgs := os.Args[2:]
-	switch os.Args[1] {
-	case "init":
-		err = initCmd.Run(os.Stdout, subArgs...)
-	case "hash-object":
-		err = hashObjectCmd.Run(os.Stdout, subArgs...)
-	case "cat-file":
-		err = catFileCmd.Run(os.Stdout, subArgs...)
-	case "update-index":
-		err = updateIndexCmd.Run(os.Stdout, subArgs...)
-	case "status":
-		err = statusCmd.Run(os.Stdout, subArgs...)
-	default:
-		fmt.Fprintf(os.Stderr, "error: unknown command - %q\n", os.Args[1])
-		os.Exit(1)
+	for _, c := range commands {
+		if c.Name() == cmd {
+			if err := c.Run(os.Stdout, subArgs...); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		os.Exit(1)
-	}
+	usage(commands)
+	fmt.Fprintf(os.Stderr, "error: unknown command - %q\n", os.Args[1])
+	os.Exit(1)
 }
 
 func newFlagSet(name string) *flag.FlagSet {
@@ -85,5 +77,6 @@ Commands:
 	fmt.Fprintf(os.Stderr, `
 Global options:
   -h            Show help
+
 `)
 }
