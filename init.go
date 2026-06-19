@@ -9,13 +9,38 @@ import (
 	"strings"
 )
 
-func init_(fs *flag.FlagSet, w io.Writer, args ...string) error {
-	fs.Usage = func() {
-		fmt.Fprintf(w, "ekko-init - Create an empty Git repository")
-		fs.PrintDefaults()
-	}
+type InitCmd struct {
+	description string
 
-	if err := fs.Parse(args); err != nil {
+	fs *flag.FlagSet
+}
+
+func NewInitCmd(fs *flag.FlagSet) *InitCmd {
+	cmd := &InitCmd{
+		description: "Initialize repository",
+		fs:          fs}
+
+	cmd.defineFlags()
+	return cmd
+}
+
+func (cmd *InitCmd) defineFlags() {
+	cmd.fs.Usage = func() {
+		fmt.Fprintf(cmd.fs.Output(), "ekko-init - Create an empty Git repository")
+		cmd.fs.PrintDefaults()
+	}
+}
+
+func (cmd *InitCmd) Description() string {
+	return cmd.description
+}
+
+func (cmd *InitCmd) Name() string {
+	return cmd.fs.Name()
+}
+
+func (cmd *InitCmd) Run(w io.Writer, args ...string) error {
+	if err := cmd.fs.Parse(args); err != nil {
 		return err
 	}
 

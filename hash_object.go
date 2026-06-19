@@ -21,31 +21,61 @@ const (
 	typeTag    = "tag"
 )
 
-func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
-	fs.Usage = func() {
-		fmt.Fprintf(w, "ekko-hash-object - Compute object ID and optionally create an object from a file\n\n")
-		fs.PrintDefaults()
+type HashObjectCmd struct {
+	description string
+
+	hashObjectConfig
+
+	fs *flag.FlagSet
+}
+
+type hashObjectConfig struct {
+	gitObjectType string
+	useStdin      bool
+	writeObject   bool
+}
+
+func NewHashObjectCmd(fs *flag.FlagSet) *HashObjectCmd {
+	cmd := &HashObjectCmd{
+		description: "Hash and optionally store objects",
+		fs:          fs,
 	}
 
-	var (
-		gitObjectType = typeBlob
-		useStdin      bool
-		writeObject   bool
-	)
+	cmd.hashObjectConfig = hashObjectConfig{gitObjectType: typeBlob}
 
-	fs.Func("t", "Specify the type of object to be created (default: \"blob\"). Possible values are commit, tree, blob, and tag.", func(typ string) error {
+	cmd.defineFlags()
+	return cmd
+}
+
+func (cmd *HashObjectCmd) defineFlags() {
+	cmd.fs.Usage = func() {
+		fmt.Fprintf(cmd.fs.Output(), "ekko-hash-object - Compute object ID and optionally create an object from a file\n\n")
+		cmd.fs.PrintDefaults()
+	}
+
+	cmd.fs.Func("t", "Specify the type of object to be created (default: \"blob\"). Possible values are commit, tree, blob, and tag.", func(typ string) error {
 		validTypes := []string{typeBlob, typeCommit, typeTree, typeTag}
 		if idx := slices.Index(validTypes, typ); idx == -1 {
 			return fmt.Errorf("invalid object type %q", typ)
 		} else {
-			gitObjectType = validTypes[idx]
+			cmd.gitObjectType = validTypes[idx]
 			return nil
 		}
 	})
-	fs.BoolVar(&useStdin, "stdin", false, "Read the object from standard input instead of from a file.")
-	fs.BoolVar(&writeObject, "w", false, "Actually write the object into the object database.")
+	cmd.fs.BoolVar(&cmd.useStdin, "stdin", false, "Read the object from standard input instead of from a file.")
+	cmd.fs.BoolVar(&cmd.writeObject, "w", false, "Actually write the object into the object database.")
+}
 
-	if err := fs.Parse(args); err != nil {
+func (cmd *HashObjectCmd) Description() string {
+	return cmd.description
+}
+
+func (cmd *HashObjectCmd) Name() string {
+	return cmd.fs.Name()
+}
+
+func (cmd *HashObjectCmd) Run(w io.Writer, args ...string) error {
+	if err := cmd.fs.Parse(args); err != nil {
 		return err
 	}
 
@@ -54,20 +84,20 @@ func hashObject(fs *flag.FlagSet, w io.Writer, args ...string) error {
 		err error
 	)
 
-	if useStdin {
+	if cmd.useStdin {
 		r = os.Stdin
 	} else {
-		filepath := fs.Arg(0)
-		if filepath == "" {
+		path := cmd.fs.Arg(0)
+		if path == "" {
 			return errors.New("no input file provided")
 		}
-		r, err = os.Open(filepath)
+		r, err = os.Open(path)
 		if err != nil {
 			return err
 		}
 	}
 
-	objectID, err := runHashObject(r, gitObjectType, writeObject)
+	objectID, err := runHashObject(r, cmd.gitObjectType, cmd.writeObject)
 	if err != nil {
 		return err
 	}
@@ -95,9 +125,9 @@ func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectI
 			return nil, err
 		}
 
-		filepath := filepath.Join(dirpath, filename)
+		path := filepath.Join(dirpath, filename)
 
-		f, err := os.Create(filepath)
+		f, err := os.Create(path)
 		if err != nil {
 			return nil, err
 		}

@@ -6,20 +6,38 @@ import (
 	"os"
 )
 
+type Command interface {
+	Name() string
+	Description() string
+}
+
 func main() {
 	root := newFlagSet("ekko")
-	root.Usage = usage
 	help := root.Bool("h", false, "show help")
 	root.Parse(os.Args[1:])
 
+	initCmd := NewInitCmd(newFlagSet("init"))
+	hashObjectCmd := NewHashObjectCmd(newFlagSet("hash-object"))
+	catFileCmd := NewCatFileCmd(newFlagSet("cat-file"))
+	updateIndexCmd := NewUpdateIndexCmd(newFlagSet("update-index"))
+	statusCmd := NewStatusCmd(newFlagSet("status"))
+
+	commands := []Command{
+		initCmd,
+		statusCmd,
+		hashObjectCmd,
+		catFileCmd,
+		updateIndexCmd,
+	}
+
 	if *help {
-		usage()
+		usage(commands)
 		return
 	}
 
 	args := root.Args()
 	if len(args) == 0 {
-		usage()
+		usage(commands)
 		os.Exit(1)
 	}
 
@@ -28,13 +46,15 @@ func main() {
 	subArgs := os.Args[2:]
 	switch os.Args[1] {
 	case "init":
-		err = init_(newFlagSet("init"), os.Stdout, subArgs...)
+		err = initCmd.Run(os.Stdout, subArgs...)
 	case "hash-object":
-		err = hashObject(newFlagSet("hash-object"), os.Stdout, subArgs...)
+		err = hashObjectCmd.Run(os.Stdout, subArgs...)
 	case "cat-file":
-		err = catFile(newFlagSet("cat-file"), os.Stdout, subArgs...)
+		err = catFileCmd.Run(os.Stdout, subArgs...)
 	case "update-index":
-		err = updateIndex(newFlagSet("update-index"), os.Stdout, subArgs...)
+		err = updateIndexCmd.Run(os.Stdout, subArgs...)
+	case "status":
+		err = statusCmd.Run(os.Stdout, subArgs...)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command - %q\n", os.Args[1])
 		os.Exit(1)
@@ -50,21 +70,20 @@ func newFlagSet(name string) *flag.FlagSet {
 	return flag.NewFlagSet(name, flag.ExitOnError)
 }
 
-func usage() {
+func usage(commands []Command) {
 	fmt.Fprintf(os.Stderr, `Ekko - a git-like object system
 
 Usage:
   ekko <command> [options]
 
 Commands:
-  init          Initialize repository
-  hash-object   Hash and optionally store objects
+`)
+	for _, cmd := range commands {
+		fmt.Fprintf(os.Stderr, "  %-20s%s\n", cmd.Name(), cmd.Description())
+	}
 
+	fmt.Fprintf(os.Stderr, `
 Global options:
   -h            Show help
-
-Examples:
-  ekko init
-  ekko hash-object -w --stdin
 `)
 }

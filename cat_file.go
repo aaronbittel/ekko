@@ -14,25 +14,54 @@ import (
 
 var ErrBadFile = errors.New("bad file")
 
-func catFile(fs *flag.FlagSet, w io.Writer, args ...string) error {
-	fs.Usage = func() {
-		fmt.Fprintf(w, "ekko-cat-file - Provide contents or details of repository objects\n\n")
-		fs.PrintDefaults()
+type CatFileCmd struct {
+	description string
+
+	catFileConfig
+
+	fs *flag.FlagSet
+}
+
+type catFileConfig struct {
+	prettyPrint bool
+	showType    bool
+}
+
+func NewCatFileCmd(fs *flag.FlagSet) *CatFileCmd {
+	cmd := &CatFileCmd{
+		description: "Inspect Git objects from the database",
+		fs:          fs,
 	}
 
-	var (
-		prettyPrint bool
-		showType    bool
-	)
+	cmd.defineFlags()
+	return cmd
+}
 
-	fs.BoolVar(&prettyPrint, "p", false, "Pretty-print the contents of <object> based on its type.")
-	fs.BoolVar(&showType, "t", false, "Instead of the content, show the object type identified by <object>.")
+func (cmd *CatFileCmd) defineFlags() {
+	cmd.fs.Usage = func() {
+		fmt.Fprintf(cmd.fs.Output(), "ekko-cat-file - Provide contents or details of repository objects\n\n")
+		cmd.fs.PrintDefaults()
+	}
 
-	if err := fs.Parse(args); err != nil {
+	cmd.fs.BoolVar(&cmd.prettyPrint, "p", false, "Pretty-print the contents of <object> based on its type.")
+	cmd.fs.BoolVar(&cmd.showType, "t", false, "Instead of the content, show the object type identified by <object>.")
+
+}
+
+func (cmd *CatFileCmd) Description() string {
+	return cmd.description
+}
+
+func (cmd *CatFileCmd) Name() string {
+	return cmd.fs.Name()
+}
+
+func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
+	if err := cmd.fs.Parse(args); err != nil {
 		return err
 	}
 
-	if prettyPrint && showType {
+	if cmd.prettyPrint && cmd.showType {
 		return fmt.Errorf("-p and -t are mutually exclusive")
 	}
 
@@ -41,23 +70,23 @@ func catFile(fs *flag.FlagSet, w io.Writer, args ...string) error {
 		objectName   string
 	)
 
-	if prettyPrint {
-		objectName = fs.Arg(0)
+	if cmd.prettyPrint {
+		objectName = cmd.fs.Arg(0)
 		if objectName == "" {
-			fs.Usage()
+			cmd.fs.Usage()
 			return fmt.Errorf("missing object name")
 		}
-	} else if showType {
-		objectName = fs.Arg(0)
+	} else if cmd.showType {
+		objectName = cmd.fs.Arg(0)
 		if objectName == "" {
-			fs.Usage()
+			cmd.fs.Usage()
 			return fmt.Errorf("missing object name")
 		}
 	} else {
-		expectedType = fs.Arg(0)
-		objectName = fs.Arg(1)
+		expectedType = cmd.fs.Arg(0)
+		objectName = cmd.fs.Arg(1)
 		if expectedType == "" || objectName == "" {
-			fs.Usage()
+			cmd.fs.Usage()
 			return fmt.Errorf("missing object name or expected object type")
 		}
 	}
@@ -72,12 +101,12 @@ func catFile(fs *flag.FlagSet, w io.Writer, args ...string) error {
 		return err
 	}
 
-	if showType {
+	if cmd.showType {
 		fmt.Fprintln(w, objectType)
 		return nil
 	}
 
-	if !prettyPrint && objectType != expectedType {
+	if !cmd.prettyPrint && objectType != expectedType {
 		return fmt.Errorf("expected object type %q, got %q", expectedType, objectType)
 	}
 

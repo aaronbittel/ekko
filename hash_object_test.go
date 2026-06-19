@@ -16,7 +16,8 @@ import (
 
 func TestHashObject(t *testing.T) {
 	t.Run("invalid flag", func(t *testing.T) {
-		err := hashObject(newTestFlagSet(), new(strings.Builder), "-t", "bla")
+		cmd := NewHashObjectCmd(newTestFlagSet())
+		err := cmd.Run(io.Discard, "-t", "bla")
 		assert.ErrorContains(t, err, "invalid object type \"bla\"")
 	})
 
@@ -25,7 +26,8 @@ func TestHashObject(t *testing.T) {
 		assert.NoError(t, initRepo(io.Discard))
 		require.NoError(t, os.WriteFile("test-content.txt", []byte("test content\n"), 0777))
 
-		assert.NoError(t, hashObject(newTestFlagSet(), io.Discard, "-w", "test-content.txt"))
+		cmd := NewHashObjectCmd(newTestFlagSet())
+		assert.NoError(t, cmd.Run(io.Discard, "-w", "test-content.txt"))
 
 		path := filepath.Join(".git", "objects", "d6", "70460b4b4aece5915caf5c68d12f560a9fe3e4")
 		require.FileExists(t, path)
@@ -63,8 +65,8 @@ func TestHashObject(t *testing.T) {
 
 		out := new(bytes.Buffer)
 
-		err = hashObject(newTestFlagSet(), out, "--stdin")
-		require.NoError(t, err)
+		cmd := NewHashObjectCmd(newTestFlagSet())
+		require.NoError(t, cmd.Run(out, "--stdin"))
 
 		assert.Equal(t, "bd9dbf5aae1a3862dd1526723246b20206e5fc37", strings.TrimSpace(out.String()))
 	})

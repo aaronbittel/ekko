@@ -27,6 +27,103 @@ var (
 	version4 = version(4) //lint:ignore U1000 currently unused, but here for documentation
 )
 
+type UpdateIndexCmd struct {
+	description string
+
+	updateIndexConfig
+
+	fs *flag.FlagSet
+}
+
+type updateIndexConfig struct {
+	add   bool
+	cinfo *cacheinfo
+}
+
+func NewUpdateIndexCmd(fs *flag.FlagSet) *UpdateIndexCmd {
+	cmd := &UpdateIndexCmd{
+		description: "Add file contents to the index",
+		fs:          fs,
+	}
+
+	cmd.defineFlags()
+	return cmd
+}
+
+func (cmd *UpdateIndexCmd) defineFlags() {
+	cmd.fs.Usage = func() {
+		fmt.Fprintf(cmd.fs.Output(), "ekko-update-index - Register file contents in the working tree to the index\n\n")
+		cmd.fs.PrintDefaults()
+	}
+
+	cmd.fs.BoolVar(&cmd.add, "add", false, "If a specified file isn’t in the index already then it’s added. Default behaviour is to ignore new files.")
+	cmd.fs.Func("cacheinfo", "Directly insert the specified info into the index. Expecting <mode>,<object>,<path>.", func(arg string) error {
+		parts := strings.SplitN(arg, ",", 3)
+		if len(parts) != 3 {
+			return errors.New("expect <mode>,<object>,<path>")
+		}
+
+		var (
+			mode   = parts[0]
+			object = parts[1]
+			path   = parts[2]
+		)
+
+		cmd.cinfo = &cacheinfo{}
+
+		switch mode {
+		case "100644":
+			cmd.cinfo.mode = RegularFile
+		case "100755":
+			cmd.cinfo.mode = RegularFile
+		case "120000":
+			cmd.cinfo.mode = SymbolicLink
+		case "160000":
+			cmd.cinfo.mode = GitLink
+		default:
+			return fmt.Errorf("invalid mode %q", parts[0])
+		}
+
+		objectSha, err := sha1FromString(object)
+		if err != nil {
+			return fmt.Errorf("--cacheinfo cannot add %s", object)
+
+		}
+		cmd.cinfo.object = objectSha
+
+		cmd.cinfo.path = path
+
+		return nil
+	})
+}
+
+func (cmd *UpdateIndexCmd) Description() string {
+	return cmd.description
+}
+
+func (cmd *UpdateIndexCmd) Name() string {
+	return cmd.fs.Name()
+}
+
+func (cmd *UpdateIndexCmd) Run(w io.Writer, args ...string) error {
+	if err := cmd.fs.Parse(args); err != nil {
+		return err
+	}
+
+	if !cmd.add {
+		cmd.fs.Usage()
+		fmt.Fprintln(os.Stderr, "must use '--add'")
+	}
+
+	path := cmd.fs.Arg(0)
+	if path == "" && cmd.cinfo == nil {
+		cmd.fs.Usage()
+		fmt.Fprintln(os.Stderr, "no filename provided")
+	}
+
+	return runUpdateIndex(path, cmd.cinfo)
+}
+
 type indexHeader struct {
 	signature [4]byte
 	// The current supported versions are 2, 3 and 4.
@@ -259,75 +356,6 @@ type cacheinfo struct {
 	mode   gitMode
 	object gitSha1
 	path   string
-}
-
-func updateIndex(fs *flag.FlagSet, w io.Writer, args ...string) error {
-	fs.Usage = func() {
-		fmt.Fprintf(w, "ekko-update-index - Register file contents in the working tree to the index\n\n")
-		fs.PrintDefaults()
-	}
-
-	var (
-		add   bool
-		cinfo *cacheinfo = nil
-	)
-
-	fs.BoolVar(&add, "add", false, "If a specified file isn’t in the index already then it’s added. Default behaviour is to ignore new files.")
-	fs.Func("cacheinfo", "Directly insert the specified info into the index. Expecting <mode>,<object>,<path>.", func(arg string) error {
-		parts := strings.SplitN(arg, ",", 3)
-		if len(parts) != 3 {
-			return errors.New("expect <mode>,<object>,<path>")
-		}
-
-		var (
-			mode   = parts[0]
-			object = parts[1]
-			path   = parts[2]
-		)
-
-		cinfo = &cacheinfo{}
-
-		switch mode {
-		case "100644":
-			cinfo.mode = RegularFile
-		case "100755":
-			cinfo.mode = RegularFile
-		case "120000":
-			cinfo.mode = SymbolicLink
-		case "160000":
-			cinfo.mode = GitLink
-		default:
-			return fmt.Errorf("invalid mode %q", parts[0])
-		}
-
-		objectSha, err := sha1FromString(object)
-		if err != nil {
-			return fmt.Errorf("--cacheinfo cannot add %s", object)
-
-		}
-		cinfo.object = objectSha
-
-		cinfo.path = path
-
-		return nil
-	})
-
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if !add {
-		fs.Usage()
-		fmt.Fprintln(os.Stderr, "must use '--add'")
-	}
-
-	path := fs.Arg(0)
-	if path == "" && cinfo == nil {
-		fs.Usage()
-		fmt.Fprintln(os.Stderr, "no filename provided")
-	}
-
-	return runUpdateIndex(path, cinfo)
 }
 
 func runUpdateIndex(path string, cinfo *cacheinfo) error {
