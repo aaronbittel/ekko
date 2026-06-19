@@ -3,11 +3,14 @@ package main
 import (
 	"crypto/sha1"
 	"encoding/binary"
+	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -69,7 +72,7 @@ type indexEntry struct {
 	// leading slash). '/' is used as path separator. The special path components ".",
 	// ".." and ".git" (without quotes) are disallowed. Trailing slash is also
 	// disallowed.
-	pathName string
+	path string
 }
 
 type entryFlags uint16
@@ -129,16 +132,12 @@ func NewIndexEntry(path string, hash gitSha1, stat *syscall.Stat_t) *indexEntry 
 	entry.gitSha = hash
 
 	// TODO: make this configurable
-	var flags uint16
 	// assume valid: false
 	// extended-flag: false (version 2)
 	// stage: normal (no conflict)
-	nameLen := min(len(path), 0xFFF)
-	flags = uint16(nameLen)
-
-	entry.flags = entryFlags(flags)
+	entry.flags = entryFlags(min(len(path), 0xFFF))
 	entry.extendedFlags = 0
-	entry.pathName = path
+	entry.path = path
 
 	return &entry
 }
@@ -159,7 +158,7 @@ func isSymbolicLink(statMode uint32) bool {
 
 func (ie indexEntry) Encode() []byte {
 	// 11 * 4 (11 4byte fields, 20 (sha1), +8 max padding)
-	out := make([]byte, 0, 11*4+20+len(ie.pathName)+8)
+	out := make([]byte, 0, 11*4+20+len(ie.path)+8)
 	out = binary.BigEndian.AppendUint32(out, ie.ctime.seconds)
 	out = binary.BigEndian.AppendUint32(out, ie.ctime.nanoseconds)
 	out = binary.BigEndian.AppendUint32(out, ie.mtime.seconds)
@@ -176,7 +175,7 @@ func (ie indexEntry) Encode() []byte {
 	if ie.extendedFlags != 0 {
 		out = binary.BigEndian.AppendUint16(out, uint16(ie.extendedFlags))
 	}
-	out = append(out, []byte(ie.pathName)...)
+	out = append(out, []byte(ie.path)...)
 
 	padding := make([]byte, padding(len(out)))
 	out = append(out, padding...)
@@ -190,6 +189,12 @@ func padding(size int) int {
 	return 8 - (size % 8)
 }
 
+type cacheinfo struct {
+	mode   gitMode
+	object gitSha1
+	path   string
+}
+
 func updateIndex(fs *flag.FlagSet, w io.Writer, args ...string) error {
 	fs.Usage = func() {
 		fmt.Fprintf(w, "ekko-update-index - Register file contents in the working tree to the index\n\n")
@@ -197,10 +202,49 @@ func updateIndex(fs *flag.FlagSet, w io.Writer, args ...string) error {
 	}
 
 	var (
-		add bool
+		add   bool
+		cinfo *cacheinfo = nil
 	)
 
 	fs.BoolVar(&add, "add", false, "If a specified file isn’t in the index already then it’s added. Default behaviour is to ignore new files.")
+	fs.Func("cacheinfo", "Directly insert the specified info into the index. Expecting <mode>,<object>,<path>.", func(arg string) error {
+		parts := strings.SplitN(arg, ",", 3)
+		if len(parts) != 3 {
+			return errors.New("expect <mode>,<object>,<path>")
+		}
+
+		var (
+			mode   = parts[0]
+			object = parts[1]
+			path   = parts[2]
+		)
+
+		cinfo = &cacheinfo{}
+
+		switch mode {
+		case "100644":
+			cinfo.mode = RegularFile
+		case "100755":
+			cinfo.mode = RegularFile
+		case "120000":
+			cinfo.mode = SymbolicLink
+		case "160000":
+			cinfo.mode = GitLink
+		default:
+			return fmt.Errorf("invalid mode %q", parts[0])
+		}
+
+		objectSha, err := sha1FromString(object)
+		if err != nil {
+			return fmt.Errorf("--cacheinfo cannot add %s", object)
+
+		}
+		cinfo.object = objectSha
+
+		cinfo.path = path
+
+		return nil
+	})
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -212,15 +256,15 @@ func updateIndex(fs *flag.FlagSet, w io.Writer, args ...string) error {
 	}
 
 	path := fs.Arg(0)
-	if path == "" {
+	if path == "" && cinfo == nil {
 		fs.Usage()
 		fmt.Fprintln(os.Stderr, "no filename provided")
 	}
 
-	return runUpdateIndex(path)
+	return runUpdateIndex(path, cinfo)
 }
 
-func runUpdateIndex(path string) error {
+func runUpdateIndex(path string, cinfo *cacheinfo) error {
 	gitRepo, err := findGitRepo()
 	if err != nil {
 		return err
@@ -228,14 +272,19 @@ func runUpdateIndex(path string) error {
 
 	indexPath := filepath.Join(gitRepo, "index")
 
-	stat, err := getFileStat(path)
-	if err != nil {
-		return err
-	}
+	var entry *indexEntry
 
-	entry, err := buildIndexEntry(path, stat)
-	if err != nil {
-		return err
+	if cinfo != nil {
+		entry = buildIndexEntryFromCacheinfo(cinfo)
+	} else {
+		stat, err := getFileStat(path)
+		if err != nil {
+			return err
+		}
+		entry, err = buildIndexEntry(path, stat)
+		if err != nil {
+			return err
+		}
 	}
 
 	out := buildIndexFile([]*indexEntry{entry})
@@ -259,6 +308,17 @@ func buildIndexEntry(path string, stat *syscall.Stat_t) (*indexEntry, error) {
 	}
 
 	return NewIndexEntry(path, objSha1, stat), nil
+}
+
+func buildIndexEntryFromCacheinfo(cinfo *cacheinfo) *indexEntry {
+	var entry indexEntry
+
+	entry.mode = cinfo.mode
+	entry.path = cinfo.path
+	entry.gitSha = cinfo.object
+	entry.flags = entryFlags(min(len(cinfo.path), 0xFFF))
+
+	return &entry
 }
 
 func buildIndexFile(entries []*indexEntry) []byte {
@@ -287,4 +347,20 @@ func getFileStat(path string) (*syscall.Stat_t, error) {
 	}
 
 	return stat, nil
+}
+
+func sha1FromString(s string) (gitSha1, error) {
+	var out gitSha1
+
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return out, err
+	}
+
+	if len(b) != 20 {
+		return out, fmt.Errorf("invalid sha1 length: %d", len(b))
+	}
+
+	copy(out[:], b)
+	return out, nil
 }

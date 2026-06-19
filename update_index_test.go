@@ -97,7 +97,7 @@ func TestNewIndexEntry(t *testing.T) {
 				gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
 				flags:         0x0008,
 				extendedFlags: 0,
-				pathName:      "test.txt",
+				path:          "test.txt",
 			},
 		},
 	}
@@ -130,7 +130,7 @@ func TestWriteIndexEntry(t *testing.T) {
 				gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
 				flags:         0x0008,
 				extendedFlags: 0,
-				pathName:      "test.txt",
+				path:          "test.txt",
 			},
 			want: []byte{
 				0x6a, 0x35, 0x0a, 0xd8, 0x0e, 0xca, 0xe5, 0x14,
@@ -167,7 +167,7 @@ func newTestIndexEntry(t *testing.T) *indexEntry {
 		gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
 		flags:         0x0008,
 		extendedFlags: 0,
-		pathName:      "test.txt",
+		path:          "test.txt",
 	}
 }
 
