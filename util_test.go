@@ -23,7 +23,7 @@ func TestGetGitRepo(t *testing.T) {
 		got, err := findGitRepo()
 		require.NoError(t, err)
 
-		want, err := filepath.Abs(gitDir)
+		want, err := filepath.Abs(filepath.Dir(gitDir))
 		require.NoError(t, err)
 
 		assert.Equal(t, want, got)
@@ -74,7 +74,7 @@ func TestGetObjectPath(t *testing.T) {
 				)
 			}
 
-			got, err := getObjectPath(gitRepo, "d6AA")
+			got, err := getObjectPath(baseDir, "d6AA")
 
 			assert.ErrorIs(t, err, tt.wantErr)
 			assert.Equal(t,

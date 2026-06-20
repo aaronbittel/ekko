@@ -113,7 +113,7 @@ func TestGetObjectType(t *testing.T) {
 func TestLoadGitObject(t *testing.T) {
 	gitDir := newTestGitDir(t)
 
-	objectPath := filepath.Join(gitDir, "objects", "d6")
+	objectPath := filepath.Join(gitDir, ".git", "objects", "d6")
 	require.NoError(t, os.MkdirAll(objectPath, 0700))
 	objectName := "d670460b4b4aece5915caf5c68d12f560a9fe3e4"
 

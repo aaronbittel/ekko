@@ -379,7 +379,7 @@ func runUpdateIndex(path string, cinfo *cacheinfo) error {
 		return err
 	}
 
-	indexPath := filepath.Join(gitRepo, "index")
+	indexPath := filepath.Join(gitRepo, ".git", "index")
 	var entries []*indexEntry
 	_, err = os.Stat(indexPath)
 	switch {

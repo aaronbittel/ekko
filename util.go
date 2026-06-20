@@ -46,14 +46,14 @@ func findGitRepo() (string, error) {
 func findGitRepoRec(abspath string) (string, bool) {
 	if abspath == "/" {
 		if dirExists("/.git/") {
-			return "/.git/", true
+			return "/", true
 		}
 		return "", false
 	}
 
 	gitPath := filepath.Join(abspath, ".git/")
 	if dirExists(gitPath) {
-		return gitPath, true
+		return path.Dir(gitPath), true
 	}
 
 	return findGitRepoRec(path.Dir(abspath))
@@ -95,7 +95,7 @@ func getObjectPath(gitRepo, objectKey string) (string, error) {
 	objectDir := objectKey[:2]
 	objectFile := objectKey[2:]
 
-	objectPath := filepath.Join(gitRepo, "objects", objectDir)
+	objectPath := filepath.Join(gitRepo, ".git", "objects", objectDir)
 	dirEntries, err := os.ReadDir(objectPath)
 	if err != nil {
 		return "", err
