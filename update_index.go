@@ -210,10 +210,10 @@ type gitTimestamp struct {
 type gitMode uint32
 
 const (
-	RegularFile    = 0o100644
-	ExecutableFile = 0o100755
-	SymbolicLink   = 0o120000
-	GitLink        = 0o160000
+	RegularFile    gitMode = 0o100644
+	ExecutableFile gitMode = 0o100755
+	SymbolicLink   gitMode = 0o120000
+	GitLink        gitMode = 0o160000
 )
 
 type stage uint8
