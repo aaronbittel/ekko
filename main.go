@@ -24,6 +24,7 @@ func main() {
 		NewCatFileCmd(newFlagSet("cat-file")),
 		NewUpdateIndexCmd(newFlagSet("update-index")),
 		NewStatusCmd(newFlagSet("status")),
+		NewWriteTreeCmd(newFlagSet("write-tree")),
 	}
 
 	if *help {
