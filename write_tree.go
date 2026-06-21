@@ -87,14 +87,12 @@ type blobEntry struct {
 }
 
 func (b blobEntry) Encode() []byte {
-	buf := make([]byte, 0, len(b.mode)+1+len(b.hash)+1+len(b.name))
+	buf := make([]byte, 0, len(b.mode)+1+len(b.name)+1+len(b.hash))
 	buf = append(buf, b.mode...)
-	buf = append(buf, " "...)
-	buf = append(buf, "blob"...)
-	buf = append(buf, " "...)
-	buf = append(buf, b.hash[:]...)
-	buf = append(buf, " "...)
+	buf = append(buf, ' ')
 	buf = append(buf, []byte(b.name)...)
+	buf = append(buf, 0)
+	buf = append(buf, b.hash[:]...)
 	return buf
 }
 
