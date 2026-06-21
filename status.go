@@ -84,17 +84,33 @@ func (cmd *StatusCmd) Run(w io.Writer, args ...string) error {
 	}
 
 	ignoredDirs := []string{}
-	f, err := os.Open(".gitignore")
+	gitignorePath := filepath.Join(gitRepo, ".gitignore")
+	gitignoreFile, err := os.Open(gitignorePath)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	defer f.Close()
-	ignoredDirs = readGitignoreFile(f)
+	defer gitignoreFile.Close()
+	ignoredDirs = readGitignoreFile(gitignoreFile)
 
 	repoStatus, err := status(entries, gitRepo, filepath.WalkDir, ignoredDirs)
 	if err != nil {
 		return err
 	}
+
+	headPath := filepath.Join(gitRepo, ".git", "HEAD")
+	headFile, err := os.Open(headPath)
+	if err != nil {
+		return err
+	}
+	defer headFile.Close()
+
+	branchName, err := getCurrentBranch(headFile)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(w, "On branch %s\n", branchName)
+	fmt.Fprintln(w)
 
 	if len(repoStatus.modified) > 0 {
 		fmt.Fprintln(w, "Changes not staged for commit:")
@@ -227,4 +243,15 @@ func readGitignoreFile(r io.Reader) []string {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+func getCurrentBranch(r io.Reader) (string, error) {
+	var branchName string
+	n, err := fmt.Fscanf(r, "ref: refs/heads/%s", &branchName)
+
+	if err != nil || n != 1 {
+		return "", fmt.Errorf("detached HEAD or unsupported format")
+	}
+
+	return branchName, nil
 }
