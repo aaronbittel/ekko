@@ -6,6 +6,119 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestSerializeTree(t *testing.T) {
+	sha1 := newSeededSha(t, 1)
+	sha2 := newSeededSha(t, 2)
+	sha3 := newSeededSha(t, 3)
+
+	tests := []struct {
+		name        string
+		entries     []treeEntry
+		wantHeader  []byte
+		wantEntries [][]byte
+	}{
+		{
+			name:       "no entries",
+			entries:    []treeEntry{},
+			wantHeader: []byte("tree 0\x00"),
+		},
+		{
+			name: "regular file",
+			entries: []treeEntry{
+				treeEntry{typ: EntryRegularFile, hash: sha1, name: "test.txt"},
+			},
+			wantHeader: []byte("tree 36\x00"),
+			wantEntries: [][]byte{
+				append([]byte("100644 test.txt\x00"), sha1[:]...),
+			},
+		},
+		{
+			name: "regular file, executable file",
+			entries: []treeEntry{
+				treeEntry{typ: EntryExecutableFile, hash: sha1, name: "exe.sh"},
+				treeEntry{typ: EntryRegularFile, hash: sha2, name: "test.txt"},
+			},
+			wantHeader: []byte("tree 70\x00"),
+			wantEntries: [][]byte{
+				append([]byte("100755 exe.sh\x00"), sha1[:]...),
+				append([]byte("100644 test.txt\x00"), sha2[:]...),
+			},
+		},
+		{
+			name: "files and tree",
+			entries: []treeEntry{
+				treeEntry{typ: EntryExecutableFile, hash: sha1, name: "exe.sh"},
+				treeEntry{typ: EntryTree, hash: sha2, name: "dir"},
+				treeEntry{typ: EntryRegularFile, hash: sha3, name: "test.txt"},
+			},
+			wantHeader: []byte("tree 100\x00"),
+			wantEntries: [][]byte{
+				append([]byte("100755 exe.sh\x00"), sha1[:]...),
+				append([]byte("40000 dir\x00"), sha2[:]...),
+				append([]byte("100644 test.txt\x00"), sha3[:]...),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := serializeTree(tt.entries)
+			want := tt.wantHeader
+			for _, entry := range tt.wantEntries {
+				want = append(want, entry...)
+			}
+			assert.Equal(t, want, got)
+		})
+	}
+}
+
+// func TestWriteTree(t *testing.T) {
+// 	tests := []struct {
+// 		name    string
+// 		treeObj *treeObject
+// 		want    gitSha1
+// 	}{
+// 		{
+// 			name:    "no entries",
+// 			treeObj: &treeObject{},
+// 			want:    newTestSha1(t, "4b825dc642cb6eb9a060e54bf8d69288fbee4904"),
+// 		},
+// 		{
+// 			name: "single regular file",
+// 			treeObj: &treeObject{
+// 				blobs: []*blobEntry{
+// 					&blobEntry{
+// 						mode: blobModeRegular, hash: newTestSha1(t, "d670460b4b4aece5915caf5c68d12f560a9fe3e4"), name: "test.txt",
+// 					},
+// 				},
+// 			},
+// 			want: newTestSha1(t, "80865964295ae2f11d27383e5f9c0b58a8ef21da"),
+// 		},
+// 		{
+// 			name: "regular, executable file",
+// 			treeObj: &treeObject{
+// 				blobs: []*blobEntry{
+// 					&blobEntry{mode: blobModeRegular, hash: newTestSha1(t, "d670460b4b4aece5915caf5c68d12f560a9fe3e4"), name: "test.txt"},
+// 					&blobEntry{mode: blobModeExecutable, hash: newTestSha1(t, "e707a31975a22c47e3645b90f76adf78498b8c0e"), name: "exe.sh"},
+// 				},
+// 			},
+// 			want: newTestSha1(t, "f1aa8c4fe32d514994133f2250c97fb828b4477b"),
+// 		},
+// 	}
+//
+// 	for _, tt := range tests {
+// 		t.Run(tt.name, func(t *testing.T) {
+// 			memStore := MemoryStore{}
+// 			got, err := writeTree(tt.treeObj, memStore)
+// 			require.NoError(t, err)
+// 			for _, content := range memStore {
+// 				t.Log("content", content)
+// 			}
+// 			assert.Equal(t, tt.want, got)
+// 		})
+// 	}
+// }
+
 func TestCreateTree(t *testing.T) {
 	var (
 		hashA = newTestSha1(t, "1111111111111111111111111111111111111111")
@@ -269,7 +382,7 @@ func TestEncodeBlobEntry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.entry.Encode()
+			got := tt.entry.encode()
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -339,4 +452,15 @@ func TestGetTree(t *testing.T) {
 			assert.Equal(t, tt.want, tt.tree)
 		})
 	}
+}
+
+type MemoryStore map[gitSha1][]byte
+
+func (m MemoryStore) Put(hash gitSha1, data []byte) error {
+	if _, ok := m[hash]; !ok {
+		m[hash] = data
+	} else {
+		panic("hash already exists")
+	}
+	return nil
 }

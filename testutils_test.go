@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"flag"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,4 +37,17 @@ func newTestSha1(t *testing.T, s string) gitSha1 {
 
 	copy(out[:], b)
 	return out
+}
+
+func newSeededSha(t *testing.T, id int) gitSha1 {
+	t.Helper()
+
+	r := rand.New(rand.NewSource(int64(id)))
+
+	var sha gitSha1
+	for i := 0; i < len(sha); i++ {
+		sha[i] = byte(r.Intn(256))
+	}
+
+	return sha
 }
