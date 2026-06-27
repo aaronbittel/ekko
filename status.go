@@ -147,7 +147,7 @@ func status(entries []*indexEntry, root string, walk walkFunc, ignoredDirs []str
 		}
 
 		if strings.Contains(path, ".git") {
-			return nil
+			return filepath.SkipDir
 		}
 
 		if d.IsDir() {
