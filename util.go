@@ -69,31 +69,14 @@ func dirExists(dirpath string) bool {
 }
 
 // Searches for the Git repository and, if found, verifies that the
-// specified object exists. It returns the corresponding directory and file name.
-// func splitObjectKey(objectKey string) (dir, file string, err error) {
-// 	if len(objectKey) > 40 || len(objectKey) < 4 {
-// 		return "", "", fmt.Errorf("not a valid object name %q", objectKey)
-// 	}
-//
-// 	gitRepo, err := findGitRepo()
-// 	if err != nil {
-// 		return err
-// 	}
-//
-// 	objectPath := filepath.Join(gitRepo, "")
-//
-// 	return objectKey[:2], objectKey[2:], nil
-// }
-
-// Searches for the Git repository and, if found, verifies that the
 // specified object exists. It returns the filepath to the object key.
-func getObjectPath(gitRepo, objectKey string) (string, error) {
-	if len(objectKey) > 40 || len(objectKey) < 4 {
-		return "", fmt.Errorf("not a valid object name %q", objectKey)
+func getObjectPath(gitRepo, objectHashHex string) (string, error) {
+	if len(objectHashHex) > 40 || len(objectHashHex) < 4 {
+		return "", fmt.Errorf("not a valid object name %q", objectHashHex)
 	}
 
-	objectDir := objectKey[:2]
-	objectFile := objectKey[2:]
+	objectDir := objectHashHex[:2]
+	objectFile := objectHashHex[2:]
 
 	objectPath := filepath.Join(gitRepo, ".git", "objects", objectDir)
 	dirEntries, err := os.ReadDir(objectPath)
@@ -113,12 +96,12 @@ func getObjectPath(gitRepo, objectKey string) (string, error) {
 
 	switch len(matches) {
 	case 0:
-		return "", fmt.Errorf("not a valid object name %s", objectKey)
+		return "", fmt.Errorf("not a valid object name %s", objectHashHex)
 	case 1:
 		return filepath.Join(objectPath, matches[0]), nil
 	default:
 		return "", &AmbiguousObjectKeyError{
-			objectKey:             objectKey,
+			objectKey:             objectHashHex,
 			minimalUniquePrefixes: minimalUniqueObjectPrefix(matches),
 		}
 	}

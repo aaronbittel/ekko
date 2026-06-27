@@ -64,9 +64,9 @@ func (cmd *UpdateIndexCmd) defineFlags() {
 		}
 
 		var (
-			mode   = parts[0]
-			object = parts[1]
-			path   = parts[2]
+			mode          = parts[0]
+			objectHashHex = parts[1]
+			path          = parts[2]
 		)
 
 		cmd.cinfo = &cacheinfo{}
@@ -84,9 +84,9 @@ func (cmd *UpdateIndexCmd) defineFlags() {
 			return fmt.Errorf("invalid mode %q", parts[0])
 		}
 
-		objectSha, err := sha1FromString(object)
+		objectSha, err := sha1FromString(objectHashHex)
 		if err != nil {
-			return fmt.Errorf("--cacheinfo cannot add %s", object)
+			return fmt.Errorf("--cacheinfo cannot add %s", objectHashHex)
 
 		}
 		cmd.cinfo.object = objectSha
