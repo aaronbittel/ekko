@@ -25,6 +25,7 @@ func main() {
 		NewUpdateIndexCmd(newFlagSet("update-index")),
 		NewStatusCmd(newFlagSet("status")),
 		NewWriteTreeCmd(newFlagSet("write-tree")),
+		NewCommitTreeCmd(newFlagSet("commit-tree")),
 	}
 
 	if *help {
