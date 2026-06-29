@@ -29,30 +29,6 @@ type Object[R io.Reader] struct {
 	Reader       R
 }
 
-func openObjectPath(gitRepo, hash string) (io.ReadCloser, error) {
-	objectPath, err := getObjectPath(gitRepo, hash)
-	if err != nil {
-		return nil, err
-	}
-
-	f, err := os.Open(objectPath)
-	if err != nil {
-		return nil, fmt.Errorf("open git object %q: %w", objectPath, err)
-	}
-
-	return f, nil
-}
-
-// Caller must close the reader.
-func Read(gitRepo, hash string) (*Object[*bufio.Reader], error) {
-	r, err := openObjectPath(gitRepo, hash)
-	if err != nil {
-		return nil, err
-	}
-
-	return ReadObject(r)
-}
-
 func ReadObject(r io.Reader) (*Object[*bufio.Reader], error) {
 	zr, err := zlib.NewReader(r)
 	if err != nil {

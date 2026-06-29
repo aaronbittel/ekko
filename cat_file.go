@@ -91,8 +91,8 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 		}
 	}
 
-	objectHashHex := cmd.nextPositional()
-	if objectHashHex == "" {
+	hash := cmd.nextPositional()
+	if hash == "" {
 		cmd.fs.Usage()
 		return fmt.Errorf("missing object name")
 	}
@@ -102,7 +102,18 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	object, err := Read(gitRepo, objectHashHex)
+	objectPath, err := getObjectPath(gitRepo, hash)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(objectPath)
+	if err != nil {
+		return fmt.Errorf("open git object %q: %w", objectPath, err)
+	}
+	defer f.Close()
+
+	object, err := ReadObject(f)
 	if err != nil {
 		return err
 	}

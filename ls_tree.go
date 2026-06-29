@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 )
 
 type LsTreeCmd struct {
@@ -53,8 +54,8 @@ func (cmd *LsTreeCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	treeHashHex := cmd.fs.Arg(0)
-	if treeHashHex == "" {
+	hash := cmd.fs.Arg(0)
+	if hash == "" {
 		cmd.fs.Usage()
 		return fmt.Errorf("missing tree hash argument")
 	}
@@ -64,7 +65,18 @@ func (cmd *LsTreeCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	object, err := Read(gitRepo, treeHashHex)
+	objectPath, err := getObjectPath(gitRepo, hash)
+	if err != nil {
+		return err
+	}
+
+	f, err := os.Open(objectPath)
+	if err != nil {
+		return fmt.Errorf("open git object %q: %w", objectPath, err)
+	}
+	defer f.Close()
+
+	object, err := ReadObject(f)
 	if err != nil {
 		return err
 	}
@@ -130,15 +142,26 @@ func parseTreeObject(gitRepo string, object *Object[*bufio.Reader]) (lsTreeObjec
 	}
 	object.ExpectedSize -= uint64(n)
 
-	hashHex := hex.EncodeToString(hashBuf)
+	hash := hex.EncodeToString(hashBuf)
 
-	entryObject, err := Read(gitRepo, hashHex)
+	objectPath, err := getObjectPath(gitRepo, hash)
+	if err != nil {
+		return lsTreeObject{}, err
+	}
+
+	f, err := os.Open(objectPath)
+	if err != nil {
+		return lsTreeObject{}, err
+	}
+	defer f.Close()
+
+	entryObject, err := ReadObject(f)
 	if err != nil {
 		return lsTreeObject{}, err
 	}
 
 	return lsTreeObject{
-		hash: hashHex,
+		hash: hash,
 		name: name,
 		mode: mode,
 		kind: entryObject.Kind,
