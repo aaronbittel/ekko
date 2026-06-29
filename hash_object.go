@@ -5,7 +5,6 @@ import (
 	"compress/zlib"
 	"crypto/sha1"
 	"encoding/hex"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -51,6 +50,7 @@ func (cmd *HashObjectCmd) defineFlags() {
 	cmd.fs.Usage = func() {
 		fmt.Fprintf(cmd.fs.Output(), "ekko-hash-object - Compute object ID and optionally create an object from a file\n\n")
 		cmd.fs.PrintDefaults()
+		fmt.Fprintln(cmd.fs.Output())
 	}
 
 	cmd.fs.Func("t", "Specify the type of object to be created (default: \"blob\"). Possible values are commit, tree, blob, and tag.", func(typ string) error {
@@ -79,31 +79,56 @@ func (cmd *HashObjectCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	var (
-		r   io.Reader
-		err error
-	)
-
 	if cmd.useStdin {
-		r = os.Stdin
-	} else {
-		path := cmd.fs.Arg(0)
-		if path == "" {
-			return errors.New("no input file provided")
-		}
-		r, err = os.Open(path)
+		hash, err := HashObject(cmd.writeObject, os.Stdin)
 		if err != nil {
 			return err
 		}
+		fmt.Fprintln(w, hex.EncodeToString(hash))
+		return nil
 	}
 
-	objectID, err := runHashObject(r, cmd.gitObjectType, cmd.writeObject)
-	if err != nil {
-		return err
+	if cmd.fs.NArg() == 0 {
+		cmd.fs.Usage()
+		fmt.Fprintln(cmd.fs.Output(), "to write hash an object either use '--stdin' or provide file(s)")
 	}
 
-	fmt.Fprintf(w, "%x\n", objectID)
+	for i := range cmd.fs.NArg() {
+		path := cmd.fs.Arg(i)
+		f, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("open file %q: %w", path, err)
+		}
+		hash, err := HashObject(cmd.writeObject, f)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(w, hex.EncodeToString(hash))
+
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("close file %q: %w", path, err)
+		}
+	}
+
 	return nil
+}
+
+func HashObject(write bool, r io.Reader) (hash []byte, err error) {
+	object, err := BlobFromFile(r)
+	if err != nil {
+		return nil, err
+	}
+
+	if write {
+		hash, err = object.WriteToObjects()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		hash, _ = object.Write(io.Discard)
+	}
+
+	return hash, nil
 }
 
 func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectID []byte, err error) {
@@ -115,6 +140,7 @@ func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectI
 	hash := sha1.Sum(objectData)
 	objectID = hash[:]
 
+	// TODO: could make the other path (not writing) just take an io.Discard
 	if writeObject {
 		objectIDStr := hex.EncodeToString(objectID)
 		dirname := objectIDStr[:2]

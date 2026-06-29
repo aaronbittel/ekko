@@ -25,6 +25,8 @@ type CatFileCmd struct {
 type catFileConfig struct {
 	prettyPrint bool
 	showType    bool
+
+	nextPositionalIdx int
 }
 
 func NewCatFileCmd(fs *flag.FlagSet) *CatFileCmd {
@@ -40,7 +42,9 @@ func NewCatFileCmd(fs *flag.FlagSet) *CatFileCmd {
 func (cmd *CatFileCmd) defineFlags() {
 	cmd.fs.Usage = func() {
 		fmt.Fprintf(cmd.fs.Output(), "ekko-cat-file - Provide contents or details of repository objects\n\n")
+		fmt.Fprintf(cmd.fs.Output(), "Usage: ekko cat-file <type> <object>\n\n")
 		cmd.fs.PrintDefaults()
+		fmt.Fprintln(cmd.fs.Output())
 	}
 
 	cmd.fs.BoolVar(&cmd.prettyPrint, "p", false, "Pretty-print the contents of <object> based on its type.")
@@ -66,56 +70,54 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 	}
 
 	var (
-		expectedType string
-		objectName   string
+		expectedObjectKind Kind
+		err                error
 	)
 
-	if cmd.prettyPrint {
-		objectName = cmd.fs.Arg(0)
-		if objectName == "" {
+	if cmd.requireObjectType() {
+		if cmd.fs.NArg() != 2 {
 			cmd.fs.Usage()
-			return fmt.Errorf("missing object name")
+			return ErrCliUsageError
 		}
-	} else if cmd.showType {
-		objectName = cmd.fs.Arg(0)
-		if objectName == "" {
+
+		kindInput := cmd.nextPositional()
+		if kindInput == "" {
 			cmd.fs.Usage()
-			return fmt.Errorf("missing object name")
+			return fmt.Errorf("object kind must be provided when no '-p' and no '-t' flags are used")
 		}
-	} else {
-		expectedType = cmd.fs.Arg(0)
-		objectName = cmd.fs.Arg(1)
-		if expectedType == "" || objectName == "" {
-			cmd.fs.Usage()
-			return fmt.Errorf("missing object name or expected object type")
+		expectedObjectKind, err = ParseKind(kindInput)
+		if err != nil {
+			return err
 		}
 	}
 
-	gitRepo, err := findGitRepo()
+	objectHashHex := cmd.nextPositional()
+	if objectHashHex == "" {
+		cmd.fs.Usage()
+		return fmt.Errorf("missing object name")
+	}
+
+	object, err := Read(objectHashHex)
 	if err != nil {
 		return err
 	}
 
-	objectType, data, err := loadGitObject(gitRepo, objectName)
-	if err != nil {
-		return err
+	if cmd.requireObjectType() && expectedObjectKind != object.Kind {
+		return fmt.Errorf("expected object kind %q, got %q", expectedObjectKind, object.Kind)
 	}
 
 	if cmd.showType {
-		fmt.Fprintln(w, objectType)
+		fmt.Fprintln(w, object.Kind.String())
 		return nil
 	}
 
-	if !cmd.prettyPrint && objectType != expectedType {
-		return fmt.Errorf("expected object type %q, got %q", expectedType, objectType)
+	if cmd.prettyPrint && object.Kind == Tree {
+		return lsTreeImpl(w, object, false)
 	}
 
-	content, err := runCatFile(objectType, data)
-	if err != nil {
-		return err
+	if _, err := io.CopyN(w, object.Reader, int64(object.ExptecedSize)); err != nil {
+		return fmt.Errorf("copy: %w", err)
 	}
-
-	fmt.Fprint(w, content)
 
 	return nil
 }
@@ -139,20 +141,8 @@ func loadGitObject(gitRepo, objectName string) (objectType, content string, err 
 
 	return getObjectType(content)
 }
-
-func runCatFile(objectType, content string) (string, error) {
-	switch objectType {
-	case typeBlob:
-		return readBlob(content)
-	case typeTree:
-		fallthrough
-	case typeTag:
-		fallthrough
-	case typeCommit:
-		return "", fmt.Errorf("%s not implemented yet", objectType)
-	default:
-		panic("unreachable")
-	}
+func (cfg CatFileCmd) requireObjectType() bool {
+	return !cfg.prettyPrint && !cfg.showType
 }
 
 func getObjectType(content string) (typ, rest string, err error) {
@@ -201,4 +191,12 @@ func readBlob(content string) (string, error) {
 	}
 
 	return rest, nil
+}
+
+// Returns the next positional argument "" empty string, if none provided or arguments
+// are exhausted
+func (cmd *CatFileCmd) nextPositional() string {
+	arg := cmd.fs.Arg(cmd.nextPositionalIdx)
+	cmd.nextPositionalIdx++
+	return arg
 }

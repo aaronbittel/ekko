@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,6 +13,9 @@ type Command interface {
 	Description() string
 	Run(w io.Writer, args ...string) error
 }
+
+// if this error is returned by a command, then the command will print its usage.
+var ErrCliUsageError = errors.New("cli usage error")
 
 func main() {
 	root := newFlagSet("ekko")
@@ -26,6 +30,7 @@ func main() {
 		NewStatusCmd(newFlagSet("status")),
 		NewWriteTreeCmd(newFlagSet("write-tree")),
 		NewCommitTreeCmd(newFlagSet("commit-tree")),
+		NewLsTreeCmd(newFlagSet("ls-tree")),
 	}
 
 	if *help {
@@ -48,7 +53,9 @@ func main() {
 	for _, c := range commands {
 		if c.Name() == cmd {
 			if err := c.Run(os.Stdout, subArgs...); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				if !errors.Is(err, ErrCliUsageError) {
+					fmt.Fprintf(os.Stderr, "error: %s\n", err)
+				}
 				os.Exit(1)
 			}
 			return

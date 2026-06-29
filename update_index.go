@@ -264,6 +264,9 @@ func NewIndexEntry(path string, hash gitSha1, stat *syscall.Stat_t) *indexEntry 
 	return &entry
 }
 
+// Returns true if the file is executable for owner, group and other.
+//
+// Should any executable bit set, make the permissions executable?
 func isExecutable(statMode uint32) bool {
 	return (statMode&syscall.S_IXUSR) > 0 &&
 		(statMode&syscall.S_IXGRP) > 0 &&
