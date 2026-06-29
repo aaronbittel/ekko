@@ -68,6 +68,9 @@ func (cmd *LsTreeCmd) Run(w io.Writer, args ...string) error {
 	if err != nil {
 		return err
 	}
+	if object.Kind != KindTree {
+		return fmt.Errorf("not a tree object")
+	}
 
 	treeObjects, err := parseTreeObjects(gitRepo, object)
 	if err != nil {
