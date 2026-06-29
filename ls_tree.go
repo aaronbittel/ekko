@@ -73,21 +73,21 @@ func (cmd *LsTreeCmd) Run(w io.Writer, args ...string) error {
 	}
 	defer f.Close()
 
-	LsTree(w, treeHashHex, cmd.nameOnly)
+	LsTree(w, gitRepo, treeHashHex, cmd.nameOnly)
 
 	return nil
 }
 
-func LsTree(w io.Writer, treeHashHex string, nameOnly bool) error {
-	object, err := Read(treeHashHex)
+func LsTree(w io.Writer, gitRepo, treeHashHex string, nameOnly bool) error {
+	object, err := Read(gitRepo, treeHashHex)
 	if err != nil {
 		return err
 	}
 
-	return lsTreeImpl(w, object, nameOnly)
+	return lsTreeImpl(gitRepo, w, object, nameOnly)
 }
 
-func lsTreeImpl(w io.Writer, object *Object[*bufio.Reader], nameOnly bool) error {
+func lsTreeImpl(gitRepo string, w io.Writer, object *Object[*bufio.Reader], nameOnly bool) error {
 	for {
 		modeAndName, err := object.Reader.ReadSlice(0)
 		if err != nil {

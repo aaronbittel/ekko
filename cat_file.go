@@ -97,7 +97,12 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 		return fmt.Errorf("missing object name")
 	}
 
-	object, err := Read(objectHashHex)
+	gitRepo, err := findGitRepo()
+	if err != nil {
+		return err
+	}
+
+	object, err := Read(gitRepo, objectHashHex)
 	if err != nil {
 		return err
 	}
@@ -112,7 +117,7 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 	}
 
 	if cmd.prettyPrint && object.Kind == Tree {
-		return lsTreeImpl(w, object, false)
+		return lsTreeImpl(gitRepo, w, object, false)
 	}
 
 	if _, err := io.CopyN(w, object.Reader, int64(object.ExpectedSize)); err != nil {
