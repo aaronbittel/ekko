@@ -23,8 +23,7 @@ type CommitTreeCmd struct {
 }
 
 type commitTreeConfig struct {
-	treeHash gitSha1
-	message  string
+	message string
 }
 
 func NewCommitTreeCmd(fs *flag.FlagSet) *CommitTreeCmd {
@@ -158,6 +157,7 @@ type timestamp struct {
 	offset  string
 }
 
+//lint:ignore U1000 keep constructor for now
 func newSignature(role commitRole, name, email string, secondsSinceEpoch int64, timezone string) *signature {
 	return &signature{
 		role:      role,

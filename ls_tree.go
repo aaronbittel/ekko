@@ -93,10 +93,10 @@ func lsTreeImpl(w io.Writer, object *Object[*bufio.Reader], nameOnly bool) error
 		if err != nil {
 			return err
 		}
-		object.ExptecedSize -= uint64(len(modeAndName))
-		if object.ExptecedSize <= 0 {
+		if object.ExpectedSize < uint64(len(modeAndName)) {
 			return fmt.Errorf("read tree entry")
 		}
+		object.ExpectedSize -= uint64(len(modeAndName))
 		modeAndName = modeAndName[:len(modeAndName)-1]
 		mode, name, found := bytes.Cut(modeAndName, []byte{' '})
 		if !found {
@@ -108,10 +108,10 @@ func lsTreeImpl(w io.Writer, object *Object[*bufio.Reader], nameOnly bool) error
 		if err != nil {
 			return fmt.Errorf("read tree entry hash")
 		}
-		object.ExptecedSize -= uint64(n)
-		if object.ExptecedSize < 0 {
-			return fmt.Errorf("read tree entry")
+		if object.ExpectedSize < uint64(n) {
+			return fmt.Errorf("tree entry exceeds expected size")
 		}
+		object.ExpectedSize -= uint64(n)
 
 		hashHex := hex.EncodeToString(hashBuf)
 
@@ -125,7 +125,7 @@ func lsTreeImpl(w io.Writer, object *Object[*bufio.Reader], nameOnly bool) error
 			fmt.Fprintf(w, "%06s %s %s    %s\n", mode, entryObject.Kind, hashHex, name)
 		}
 
-		if object.ExptecedSize == 0 {
+		if object.ExpectedSize == 0 {
 			break
 		}
 	}

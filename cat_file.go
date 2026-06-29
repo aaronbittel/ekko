@@ -115,7 +115,7 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 		return lsTreeImpl(w, object, false)
 	}
 
-	if _, err := io.CopyN(w, object.Reader, int64(object.ExptecedSize)); err != nil {
+	if _, err := io.CopyN(w, object.Reader, int64(object.ExpectedSize)); err != nil {
 		return fmt.Errorf("copy: %w", err)
 	}
 

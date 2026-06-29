@@ -37,7 +37,7 @@ func TestCommitObjectEncode(t *testing.T) {
 				},
 				message: "I AM BATMAN!",
 			},
-			want: []byte(fmt.Sprintf("commit 181\x00tree %s\nauthor Bruce Wayne <bruce.wayne@gothem.com> 15345353 +0200\ncommitter Bruce Wayne <bruce.wayne@gothem.com> 15345353 +0200\n\nI AM BATMAN!\n", sha1Hex)),
+			want: fmt.Appendf(nil, "commit 181\x00tree %s\nauthor Bruce Wayne <bruce.wayne@gothem.com> 15345353 +0200\ncommitter Bruce Wayne <bruce.wayne@gothem.com> 15345353 +0200\n\nI AM BATMAN!\n", sha1Hex),
 		},
 	}
 

@@ -25,7 +25,7 @@ const (
 
 type Object[R io.Reader] struct {
 	Kind         Kind
-	ExptecedSize uint64
+	ExpectedSize uint64
 	Reader       R
 }
 
@@ -82,7 +82,7 @@ func Read(hash string) (*Object[*bufio.Reader], error) {
 
 	return &Object[*bufio.Reader]{
 		Kind:         kind,
-		ExptecedSize: size,
+		ExpectedSize: size,
 		Reader:       bzr,
 	}, nil
 }
@@ -90,8 +90,8 @@ func Read(hash string) (*Object[*bufio.Reader], error) {
 func (o *Object[R]) Write(w io.Writer) (hash []byte, err error) {
 	zw := zlib.NewWriter(w)
 	hw := &ObjectHashWriter{w: zw, hash: sha1.New()}
-	fmt.Fprintf(hw, "%s %d\x00", o.Kind, o.ExptecedSize)
-	if _, err := io.CopyN(hw, o.Reader, int64(o.ExptecedSize)); err != nil {
+	fmt.Fprintf(hw, "%s %d\x00", o.Kind, o.ExpectedSize)
+	if _, err := io.CopyN(hw, o.Reader, int64(o.ExpectedSize)); err != nil {
 		return nil, err
 	}
 	if err := zw.Close(); err != nil {
@@ -140,7 +140,7 @@ func BlobFromFile(r io.Reader) (*Object[io.Reader], error) {
 
 	return &Object[io.Reader]{
 		Kind:         Blob,
-		ExptecedSize: uint64(len(data)),
+		ExpectedSize: uint64(len(data)),
 		Reader:       bytes.NewReader(data),
 	}, nil
 }

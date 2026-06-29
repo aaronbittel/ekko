@@ -45,7 +45,7 @@ func newSeededSha(t *testing.T, id int) gitSha1 {
 	r := rand.New(rand.NewSource(int64(id)))
 
 	var sha gitSha1
-	for i := 0; i < len(sha); i++ {
+	for i := range len(sha) {
 		sha[i] = byte(r.Intn(256))
 	}
 

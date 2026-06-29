@@ -83,14 +83,13 @@ func (cmd *StatusCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	ignoredDirs := []string{}
 	gitignorePath := filepath.Join(gitRepo, ".gitignore")
 	gitignoreFile, err := os.Open(gitignorePath)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	defer gitignoreFile.Close()
-	ignoredDirs = readGitignoreFile(gitignoreFile)
+	ignoredDirs := readGitignoreFile(gitignoreFile)
 
 	repoStatus, err := status(entries, gitRepo, filepath.WalkDir, ignoredDirs)
 	if err != nil {

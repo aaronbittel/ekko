@@ -108,16 +108,6 @@ func (t treeEntry) encode() []byte {
 	return buf
 }
 
-func encodeTree(name string, hash gitSha1) []byte {
-	buf := make([]byte, 0, 5+1+len(name)+1+len(hash))
-	buf = append(buf, "40000"...)
-	buf = append(buf, ' ')
-	buf = append(buf, name...)
-	buf = append(buf, 0)
-	buf = append(buf, hash[:]...)
-	return buf
-}
-
 func writeTree(treeObj *treeObject, store ObjectStore) (gitSha1, error) {
 	blobEntry := func(blob *blobEntry) treeEntry {
 		typ := EntryRegularFile
@@ -277,10 +267,6 @@ outer:
 
 func newTreeRoot() *treeObject {
 	return newTreeObject("")
-}
-
-func (t treeObject) contentLength() int {
-	return 0
 }
 
 func (t *treeObject) String() string {
