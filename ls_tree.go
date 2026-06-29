@@ -94,16 +94,12 @@ type lsTreeObject struct {
 func parseTreeObjects(gitRepo string, object *Object[*bufio.Reader]) ([]lsTreeObject, error) {
 	treeObjects := []lsTreeObject{}
 
-	for {
+	for object.ExpectedSize > 0 {
 		treeObj, err := parseTreeObject(gitRepo, object)
 		if err != nil {
 			return nil, err
 		}
 		treeObjects = append(treeObjects, treeObj)
-
-		if object.ExpectedSize == 0 {
-			break
-		}
 	}
 
 	return treeObjects, nil

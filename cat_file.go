@@ -116,7 +116,7 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 		return nil
 	}
 
-	if cmd.prettyPrint && object.Kind == Tree {
+	if cmd.prettyPrint && object.Kind == KindTree {
 		treeObjects, err := parseTreeObjects(gitRepo, object)
 		if err != nil {
 			return err

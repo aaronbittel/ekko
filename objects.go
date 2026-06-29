@@ -17,10 +17,10 @@ import (
 type Kind int
 
 const (
-	Blob Kind = iota
-	Tree
-	Commit
-	Tag
+	KindBlob Kind = iota
+	KindTree
+	KindCommit
+	KindTag
 )
 
 type Object[R io.Reader] struct {
@@ -76,13 +76,13 @@ func ReadObject(r io.Reader) (*Object[*bufio.Reader], error) {
 
 	switch {
 	case bytes.Equal(kindBytes, []byte("blob")):
-		kind = Blob
+		kind = KindBlob
 	case bytes.Equal(kindBytes, []byte("tree")):
-		kind = Tree
+		kind = KindTree
 	case bytes.Equal(kindBytes, []byte("commit")):
-		kind = Commit
+		kind = KindCommit
 	case bytes.Equal(kindBytes, []byte("tag")):
-		kind = Tag
+		kind = KindTag
 	default:
 		return nil, fmt.Errorf("unknown git object type %q", kindBytes)
 	}
@@ -151,7 +151,7 @@ func BlobFromFile(r io.Reader) (*Object[io.Reader], error) {
 	}
 
 	return &Object[io.Reader]{
-		Kind:         Blob,
+		Kind:         KindBlob,
 		ExpectedSize: uint64(len(data)),
 		Reader:       bytes.NewReader(data),
 	}, nil
@@ -177,13 +177,13 @@ func (hw *ObjectHashWriter) Sum() []byte {
 
 func (k Kind) String() string {
 	switch k {
-	case Blob:
+	case KindBlob:
 		return "blob"
-	case Tree:
+	case KindTree:
 		return "tree"
-	case Commit:
+	case KindCommit:
 		return "commit"
-	case Tag:
+	case KindTag:
 		return "tag"
 	default:
 		panic("unknown object kind")
@@ -193,13 +193,13 @@ func (k Kind) String() string {
 func ParseKind(arg string) (Kind, error) {
 	switch arg {
 	case "blob":
-		return Blob, nil
+		return KindBlob, nil
 	case "tree":
-		return Tree, nil
+		return KindTree, nil
 	case "commit":
-		return Commit, nil
+		return KindCommit, nil
 	case "tag":
-		return Tag, nil
+		return KindTag, nil
 	default:
 		return 0, fmt.Errorf("unknown object kind %q", arg)
 	}
