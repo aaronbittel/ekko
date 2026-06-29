@@ -128,13 +128,13 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 	}
 
 	if cmd.prettyPrint && object.Kind == KindTree {
-		treeObjects, err := parseTreeObjects(gitRepo, object)
+		treeNodes, err := parseTreeObjects(gitRepo, object)
 		if err != nil {
 			return err
 		}
 
-		for _, treeObj := range treeObjects {
-			writeTreeObject(treeObj, w, false)
+		for _, treeNode := range treeNodes {
+			writeTreeNode(treeNode, w, false)
 		}
 
 		return nil
