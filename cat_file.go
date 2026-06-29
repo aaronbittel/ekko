@@ -117,7 +117,16 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 	}
 
 	if cmd.prettyPrint && object.Kind == Tree {
-		return lsTreeImpl(gitRepo, w, object, false)
+		treeObjects, err := parseTreeObjects(gitRepo, object)
+		if err != nil {
+			return err
+		}
+
+		for _, treeObj := range treeObjects {
+			writeTreeObject(treeObj, w, false)
+		}
+
+		return nil
 	}
 
 	if _, err := io.CopyN(w, object.Reader, int64(object.ExpectedSize)); err != nil {

@@ -7,8 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 )
 
 type LsTreeCmd struct {
@@ -66,69 +64,92 @@ func (cmd *LsTreeCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	objectPath := filepath.Join(gitRepo, ".git", "objects", treeHashHex[:2], treeHashHex[2:])
-	f, err := os.Open(objectPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	LsTree(w, gitRepo, treeHashHex, cmd.nameOnly)
-
-	return nil
-}
-
-func LsTree(w io.Writer, gitRepo, treeHashHex string, nameOnly bool) error {
 	object, err := Read(gitRepo, treeHashHex)
 	if err != nil {
 		return err
 	}
 
-	return lsTreeImpl(gitRepo, w, object, nameOnly)
+	treeObjects, err := parseTreeObjects(gitRepo, object)
+	if err != nil {
+		return err
+	}
+
+	for _, treeObj := range treeObjects {
+		writeTreeObject(treeObj, w, cmd.nameOnly)
+	}
+
+	return nil
 }
 
-func lsTreeImpl(gitRepo string, w io.Writer, object *Object[*bufio.Reader], nameOnly bool) error {
+type lsTreeObject struct {
+	hash string
+	name []byte
+	mode []byte
+	kind Kind
+}
+
+func parseTreeObjects(gitRepo string, object *Object[*bufio.Reader]) ([]lsTreeObject, error) {
+	treeObjects := []lsTreeObject{}
+
 	for {
-		modeAndName, err := object.Reader.ReadSlice(0)
+		treeObj, err := parseTreeObject(gitRepo, object)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if object.ExpectedSize < uint64(len(modeAndName)) {
-			return fmt.Errorf("read tree entry")
-		}
-		object.ExpectedSize -= uint64(len(modeAndName))
-		modeAndName = modeAndName[:len(modeAndName)-1]
-		mode, name, found := bytes.Cut(modeAndName, []byte{' '})
-		if !found {
-			return fmt.Errorf("malformed tree entry, missing ' '")
-		}
-
-		hashBuf := make([]byte, 20)
-		n, err := io.ReadFull(object.Reader, hashBuf)
-		if err != nil {
-			return fmt.Errorf("read tree entry hash")
-		}
-		if object.ExpectedSize < uint64(n) {
-			return fmt.Errorf("tree entry exceeds expected size")
-		}
-		object.ExpectedSize -= uint64(n)
-
-		hashHex := hex.EncodeToString(hashBuf)
-
-		if nameOnly {
-			fmt.Fprintf(w, "%s\n", name)
-		} else {
-			entryObject, err := Read(hashHex)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(w, "%06s %s %s    %s\n", mode, entryObject.Kind, hashHex, name)
-		}
+		treeObjects = append(treeObjects, treeObj)
 
 		if object.ExpectedSize == 0 {
 			break
 		}
 	}
 
-	return nil
+	return treeObjects, nil
+}
+
+func parseTreeObject(gitRepo string, object *Object[*bufio.Reader]) (lsTreeObject, error) {
+	modeAndName, err := object.Reader.ReadSlice(0)
+	if err != nil {
+		return lsTreeObject{}, err
+	}
+	if object.ExpectedSize < uint64(len(modeAndName)) {
+		return lsTreeObject{}, fmt.Errorf("read tree entry")
+	}
+	object.ExpectedSize -= uint64(len(modeAndName))
+	modeAndName = modeAndName[:len(modeAndName)-1]
+	mode, name, found := bytes.Cut(modeAndName, []byte{' '})
+	if !found {
+		return lsTreeObject{}, fmt.Errorf("malformed tree entry, missing ' '")
+	}
+
+	hashBuf := make([]byte, 20)
+	n, err := io.ReadFull(object.Reader, hashBuf)
+	if err != nil {
+		return lsTreeObject{}, fmt.Errorf("read tree entry hash")
+	}
+	if object.ExpectedSize < uint64(n) {
+		return lsTreeObject{}, fmt.Errorf("tree entry exceeds expected size")
+	}
+	object.ExpectedSize -= uint64(n)
+
+	hashHex := hex.EncodeToString(hashBuf)
+
+	entryObject, err := Read(gitRepo, hashHex)
+	if err != nil {
+		return lsTreeObject{}, err
+	}
+
+	return lsTreeObject{
+		hash: hashHex,
+		name: name,
+		mode: mode,
+		kind: entryObject.Kind,
+	}, nil
+}
+
+func writeTreeObject(obj lsTreeObject, w io.Writer, nameOnly bool) {
+	if nameOnly {
+		fmt.Fprintf(w, "%s\n", obj.name)
+	} else {
+		fmt.Fprintf(w, "%06s %s %s\t%s\n", obj.mode, obj.kind, obj.hash, obj.name)
+	}
 }
