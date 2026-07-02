@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/hex"
 	"syscall"
 	"testing"
 
@@ -107,14 +106,14 @@ func TestNewIndexEntry(t *testing.T) {
 	tests := []struct {
 		name string
 		path string
-		hash gitSha1
+		hash string
 		stat *syscall.Stat_t
 		want *indexEntry
 	}{
 		{
 			name: "regular file",
 			path: "test.txt",
-			hash: Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
+			hash: "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a",
 			stat: &syscall.Stat_t{
 				Dev:  0x00010305, // device ID
 				Ino:  1000,       // inode
@@ -140,7 +139,7 @@ func TestNewIndexEntry(t *testing.T) {
 				userID:        3452,
 				groupID:       98798,
 				fileSize:      10,
-				gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
+				hash:          "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a",
 				flags:         0x0008,
 				extendedFlags: 0,
 				path:          "test.txt",
@@ -173,7 +172,7 @@ func TestWriteIndexEntry(t *testing.T) {
 				userID:        0x000003e8,
 				groupID:       0x000003e8,
 				fileSize:      0x0000000a,
-				gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
+				hash:          "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a",
 				flags:         0x0008,
 				extendedFlags: 0,
 				path:          "test.txt",
@@ -210,17 +209,9 @@ func newTestIndexEntry(t *testing.T, filename string) *indexEntry {
 		userID:        1234,
 		groupID:       9876,
 		fileSize:      10,
-		gitSha:        Sha1(t, "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a"),
+		hash:          "1f7a7a472abf3dd9643fd615f6da379c4acb3e3a",
 		flags:         entryFlags(len(filename)),
 		extendedFlags: 0,
 		path:          filename,
 	}
-}
-
-func Sha1(t *testing.T, s string) gitSha1 {
-	var out gitSha1
-	b, err := hex.DecodeString(s)
-	require.NoError(t, err)
-	copy(out[:], b)
-	return out
 }

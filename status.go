@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"github.com/aaronbittel/ekko/internal/objects"
 )
 
 const (
-	RED   = "\033[38;2;190;81;81m"
+	RED   = "\033[31m"
+	GREEN = "\033[32m"
 	RESET = "\033[0m"
 )
 
@@ -25,16 +28,23 @@ type StatusCmd struct {
 }
 
 type repoStatus struct {
-	untracked  []string
-	unmodified []string
-	modified   []string
+	Untracked  []string // in working tree only
+	Unmodified []string // HEAD == index == working tree
+
+	ModifiedNotStaged []string // working tree differs from index
+	ModifiedStaged    []string // index differs from HEAD (ready to commit)
+
+	DeletedNotStaged []string // deleted in working tree, not staged
+	DeletedStaged    []string // deletion staged in index
+
+	AddedStaged []string // new files added to index (not in HEAD)
 }
 
 func newRepoStatus() *repoStatus {
 	return &repoStatus{
-		untracked:  []string{},
-		unmodified: []string{},
-		modified:   []string{},
+		Untracked:         []string{},
+		Unmodified:        []string{},
+		ModifiedNotStaged: []string{},
 	}
 }
 
@@ -72,15 +82,22 @@ func (cmd *StatusCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	indexFile := filepath.Join(gitRepo, ".git", "index")
-	data, err := os.ReadFile(indexFile)
-	if err != nil {
-		return err
-	}
+	var indexEntries []*indexEntry
 
-	entries, err := readIndex(data)
+	indexFile := filepath.Join(gitRepo, ".git", "index")
+	indexData, err := os.ReadFile(indexFile)
 	if err != nil {
-		return err
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			indexEntries = []*indexEntry{}
+		default:
+			return err
+		}
+	} else {
+		indexEntries, err = readIndex(indexData)
+		if err != nil {
+			return err
+		}
 	}
 
 	gitignorePath := filepath.Join(gitRepo, ".gitignore")
@@ -91,39 +108,143 @@ func (cmd *StatusCmd) Run(w io.Writer, args ...string) error {
 	defer gitignoreFile.Close()
 	ignoredDirs := readGitignoreFile(gitignoreFile)
 
-	repoStatus, err := status(entries, gitRepo, filepath.WalkDir, ignoredDirs)
+	headData, err := os.ReadFile(filepath.Join(gitRepo, ".git", "HEAD"))
 	if err != nil {
 		return err
 	}
 
-	headPath := filepath.Join(gitRepo, ".git", "HEAD")
-	headFile, err := os.Open(headPath)
-	if err != nil {
-		return err
+	refToCurCommit, found := bytes.CutPrefix(headData, []byte("ref: "))
+	if !found {
+		return errors.New("invalid index file")
 	}
-	defer headFile.Close()
+	refToCurCommit = bytes.TrimSpace(refToCurCommit)
 
-	branchName, err := getCurrentBranch(headFile)
+	curCommitData, err := os.ReadFile(filepath.Join(gitRepo, ".git", string(refToCurCommit)))
 	if err != nil {
 		return err
 	}
+	curCommitHash := string(bytes.TrimRight(curCommitData, "\n"))
+
+	store := objects.NewStore(filepath.Join(gitRepo, ".git", "objects"))
+
+	commitObj, err := store.Open(curCommitHash)
+	if err != nil {
+		return err
+	}
+	defer commitObj.Close()
+
+	treeLine, err := commitObj.ReadSlice('\n')
+	if err != nil {
+		return err
+	}
+	treeLine = treeLine[:len(treeLine)-1] // remove newline
+
+	treeHashBytes, found := bytes.CutPrefix(treeLine, []byte("tree "))
+	if !found || len(treeHashBytes) != 40 {
+		return errors.New("invalid commit object")
+	}
+
+	treeHash := string(treeHashBytes)
+	treeFile, err := os.Open(filepath.Join(gitRepo, ".git", "objects", treeHash[:2], treeHash[2:]))
+	if err != nil {
+		return err
+	}
+	defer treeFile.Close()
+
+	treeEntries, err := objects.ParseTreeObject(treeFile)
+	if err != nil {
+		return err
+	}
+
+	repoStatus := newRepoStatus()
+
+	var indexIndex, treeIndex int
+	for indexIndex < len(indexEntries) && treeIndex < len(treeEntries) {
+		curIndex := indexEntries[indexIndex]
+		curObj := treeEntries[treeIndex]
+
+		if curIndex.path == curObj.Name {
+			// must be blobs?
+			if curIndex.hash == curObj.Hash {
+				fmt.Printf("%s == %s\n", curIndex.path, curObj.Name)
+			} else {
+				fmt.Printf("%s != %s\n", curIndex.path, curObj.Name)
+			}
+			indexIndex += 1
+			treeIndex += 1
+			continue
+		}
+
+		path := filepath.Join(gitRepo, ".git", "objects", curObj.Hash[:2], curObj.Hash[2:])
+		pf, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		// TODO: close earlier in loop
+		defer pf.Close()
+
+		obj, err := objects.NewReader(pf)
+		if err != nil {
+			return err
+		}
+		// TODO: close earlier in loop
+		defer obj.Close()
+
+		if curIndex.path < curObj.Name {
+			switch obj.Kind {
+			case objects.KindBlob: // do nothing
+			case objects.KindTree:
+				fmt.Printf("get all entries for %q. Skipping...\n", curObj.Name)
+			default:
+				return errors.New("illegal kind in tree object")
+			}
+			indexIndex += 1
+		} else {
+			switch obj.Kind {
+			case objects.KindBlob: // do nothing
+			case objects.KindTree:
+				fmt.Printf("get all entries for %q. Skipping...\n", curObj.Name)
+			default:
+				return errors.New("illegal kind in tree object")
+			}
+			treeIndex += 1
+		}
+	}
+
+	if err := indexVsWorkingtree(repoStatus, indexEntries, gitRepo, ignoredDirs); err != nil {
+		return err
+	}
+
+	branchName, found := bytes.CutPrefix(headData, []byte("ref: refs/heads/"))
+	if !found {
+		return errors.New("invalid HEAD file format")
+	}
+	branchName = bytes.TrimSpace(branchName)
 
 	fmt.Fprintf(w, "On branch %s\n", branchName)
 	fmt.Fprintln(w)
 
-	if len(repoStatus.modified) > 0 {
+	if len(repoStatus.Unmodified) > 0 {
+		fmt.Fprintln(w, "Changes to be committed:")
+		for _, path := range repoStatus.Unmodified {
+			fmt.Fprintf(w, "\t%s%s%s\n", GREEN, path, RESET)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if len(repoStatus.ModifiedNotStaged) > 0 {
 		fmt.Fprintln(w, "Changes not staged for commit:")
-		for _, path := range repoStatus.modified {
+		for _, path := range repoStatus.ModifiedNotStaged {
 			msg := fmt.Sprintf("%smodified:   %s%s", RED, path, RESET)
 			fmt.Fprintf(w, "\t%s\n", msg)
 		}
 		fmt.Fprintln(w)
 	}
 
-	if len(repoStatus.untracked) > 0 {
+	if len(repoStatus.Untracked) > 0 {
 		fmt.Fprintln(w, "Untracked files:")
 		fmt.Fprintf(w, "\t")
-		for _, path := range repoStatus.untracked {
+		for _, path := range repoStatus.Untracked {
 			msg := fmt.Sprintf("%s%s%s   ", RED, path, RESET)
 			fmt.Fprint(w, msg)
 		}
@@ -135,12 +256,8 @@ func (cmd *StatusCmd) Run(w io.Writer, args ...string) error {
 	return nil
 }
 
-type walkFunc func(root string, fn fs.WalkDirFunc) error
-
-func status(entries []*indexEntry, root string, walk walkFunc, ignoredDirs []string) (*repoStatus, error) {
-	repoStatus := newRepoStatus()
-
-	walk(root, func(path string, d fs.DirEntry, err error) error {
+func indexVsWorkingtree(repoStatus *repoStatus, entries []*indexEntry, root string, ignoredDirs []string) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -160,7 +277,7 @@ func status(entries []*indexEntry, root string, walk walkFunc, ignoredDirs []str
 
 		for _, dir := range ignoredDirs {
 			if strings.HasPrefix(p, dir) {
-				return nil
+				return filepath.SkipDir
 			}
 		}
 
@@ -171,43 +288,34 @@ func status(entries []*indexEntry, root string, walk walkFunc, ignoredDirs []str
 					return err
 				}
 				if modified {
-					repoStatus.modified = append(repoStatus.modified, p)
+					repoStatus.ModifiedNotStaged = append(repoStatus.ModifiedNotStaged, p)
 				} else {
-					repoStatus.unmodified = append(repoStatus.unmodified, p)
+					repoStatus.Unmodified = append(repoStatus.Unmodified, p)
 				}
 				return nil
 			}
 		}
 
-		repoStatus.untracked = append(repoStatus.untracked, p)
+		repoStatus.Untracked = append(repoStatus.Untracked, p)
 
 		return nil
 	})
 
-	return repoStatus, nil
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func isModified(path string, entry *indexEntry) (bool, error) {
-	stat, err := getFileStat(path)
-	if err != nil {
-		return false, err
-	}
-
-	if sameModificationTime(stat, entry) {
-		return false, nil
-	}
-
-	if !sameSize(stat, entry) {
-		return true, nil
-	}
-
 	f, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
 	defer f.Close()
 
-	ok, err := sameComputeHash(path, f, entry)
+	ok, err := sameComputeHash(f, entry)
 	if err != nil {
 		return false, err
 	}
@@ -215,20 +323,19 @@ func isModified(path string, entry *indexEntry) (bool, error) {
 	return !ok, nil
 }
 
-func sameModificationTime(stat *syscall.Stat_t, entry *indexEntry) bool {
-	return stat.Mtim.Sec == int64(entry.mtime.seconds) && stat.Mtim.Nsec == int64(entry.mtime.nanoseconds)
-}
-
-func sameComputeHash(path string, r io.Reader, entry *indexEntry) (bool, error) {
-	pHash, err := computeObjectHash(path, typeBlob, r)
+func sameComputeHash(r io.Reader, entry *indexEntry) (bool, error) {
+	object, err := objects.BlobFromReader(r)
 	if err != nil {
 		return false, err
 	}
-	return bytes.Equal(entry.gitSha[:], pHash[:]), nil
-}
+	defer object.Close()
 
-func sameSize(stat *syscall.Stat_t, entry *indexEntry) bool {
-	return stat.Size == int64(entry.fileSize)
+	hashBytes, err := object.Write(io.Discard)
+	if err != nil {
+		return false, err
+	}
+
+	return bytes.Equal([]byte(entry.hash), hashBytes), nil
 }
 
 func readGitignoreFile(r io.Reader) []string {
@@ -242,15 +349,4 @@ func readGitignoreFile(r io.Reader) []string {
 		lines = append(lines, line)
 	}
 	return lines
-}
-
-func getCurrentBranch(r io.Reader) (string, error) {
-	var branchName string
-	n, err := fmt.Fscanf(r, "ref: refs/heads/%s", &branchName)
-
-	if err != nil || n != 1 {
-		return "", fmt.Errorf("detached HEAD or unsupported format")
-	}
-
-	return branchName, nil
 }

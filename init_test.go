@@ -12,8 +12,7 @@ import (
 )
 
 func TestInitRepo(t *testing.T) {
-	dir := t.TempDir()
-	os.Chdir(dir)
+	dir := changeIntoTestDir(t)
 
 	var sb strings.Builder
 
@@ -49,7 +48,7 @@ func TestInitRepo(t *testing.T) {
 
 	data, err := os.ReadFile(filepath.Join(gitdir, "HEAD"))
 	require.NoError(t, err)
-	assert.Equal(t, string(data), "ref: refs/heads/main")
+	assert.Equal(t, string(data), "ref: refs/heads/main\n")
 
 	gitAbspath, err := filepath.Abs(gitdir)
 	require.NoError(t, err)

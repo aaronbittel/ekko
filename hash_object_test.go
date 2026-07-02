@@ -3,13 +3,13 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/aaronbittel/ekko/internal/objects"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,7 +22,8 @@ func TestHashObject(t *testing.T) {
 	})
 
 	t.Run("create object in db", func(t *testing.T) {
-		require.NoError(t, os.Chdir(t.TempDir()))
+		changeIntoTestDir(t)
+
 		assert.NoError(t, initRepo(io.Discard))
 		require.NoError(t, os.WriteFile("test-content.txt", []byte("test content\n"), 0777))
 
@@ -72,35 +73,14 @@ func TestHashObject(t *testing.T) {
 	})
 }
 
-func TestBuildObjData(t *testing.T) {
-	t.Run("blob", func(t *testing.T) {
-		r := strings.NewReader("test content\n")
-		got, err := buildObjectData(r, typeBlob)
-		assert.NoError(t, err)
-		want := "blob 13\x00test content\n"
-		assert.Equal(t, want, string(got))
-	})
-
-	for _, typ := range []string{typeCommit, typeTree, typeTag} {
-		t.Run(typ, func(t *testing.T) {
-			_, err := buildObjectData(strings.NewReader(""), typ)
-			assert.ErrorContains(t, err, fmt.Sprintf("object type %q is not supported yet", typ))
-		})
-	}
-
-	t.Run("unknown", func(t *testing.T) {
-		_, err := buildObjectData(strings.NewReader(""), "unknown")
-		assert.Error(t, err)
-		assert.Equal(t, err.Error(), "invalid object type \"unknown\"")
-	})
-}
-
 func TestRunHashObject(t *testing.T) {
 	t.Run("hashes blob content", func(t *testing.T) {
 		want := "bd9dbf5aae1a3862dd1526723246b20206e5fc37"
-		r := strings.NewReader("what is up, doc?")
-		objID, err := runHashObject(r, typeBlob, false)
+		obj, err := objects.BlobFromReader(strings.NewReader("what is up, doc?"))
 		require.NoError(t, err)
-		assert.Equal(t, want, hex.EncodeToString(objID))
+		defer obj.Close()
+		hashBytes, err := obj.Write(io.Discard)
+		require.NoError(t, err)
+		assert.Equal(t, want, hex.EncodeToString(hashBytes))
 	})
 }

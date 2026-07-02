@@ -1,13 +1,12 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
-	"os"
+	"path/filepath"
+
+	"github.com/aaronbittel/ekko/internal/objects"
 )
 
 type LsTreeCmd struct {
@@ -65,133 +64,26 @@ func (cmd *LsTreeCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	objectPath, err := getObjectPath(gitRepo, hash)
+	store := objects.NewStore(filepath.Join(gitRepo, ".git", "objects"))
+
+	obj, err := store.Open(hash)
 	if err != nil {
 		return err
 	}
+	defer obj.Close()
 
-	f, err := os.Open(objectPath)
-	if err != nil {
-		return fmt.Errorf("open git object %q: %w", objectPath, err)
-	}
-	defer f.Close()
-
-	object, err := ReadObject(f)
-	if err != nil {
-		return err
-	}
-	if object.Kind != KindTree {
+	if obj.Kind != objects.KindTree {
 		return fmt.Errorf("not a tree object")
 	}
 
-	treeObjects, err := parseTreeObjects(gitRepo, object)
+	treeEntries, err := obj.ParseAsTree()
 	if err != nil {
 		return err
 	}
 
-	for _, treeObj := range treeObjects {
-		writeTreeNode(treeObj, w, cmd.nameOnly)
+	for _, entry := range treeEntries {
+		fmt.Fprintln(w, entry.Pretty())
 	}
 
 	return nil
-}
-
-type TreeEntry struct {
-	hash string
-	name []byte
-	mode []byte
-}
-
-type TreeNode struct {
-	hash string
-	name []byte
-	mode []byte
-	kind Kind
-}
-
-func parseTreeObjects(gitRepo string, object *Object[*bufio.Reader]) ([]TreeNode, error) {
-	treeNodes := []TreeNode{}
-
-	for object.ExpectedSize > 0 {
-		treeObj, err := parseTreeObject(object)
-		if err != nil {
-			return nil, err
-		}
-
-		kind, err := retrieveObjectKind(gitRepo, treeObj.hash)
-		if err != nil {
-			return nil, err
-		}
-
-		treeNodes = append(treeNodes, TreeNode{
-			hash: treeObj.hash,
-			name: treeObj.name,
-			mode: treeObj.mode,
-			kind: kind,
-		})
-	}
-
-	return treeNodes, nil
-}
-
-func parseTreeObject(object *Object[*bufio.Reader]) (TreeEntry, error) {
-	modeAndName, err := object.Reader.ReadSlice(0)
-	if err != nil {
-		return TreeEntry{}, err
-	}
-	if object.ExpectedSize < uint64(len(modeAndName)) {
-		return TreeEntry{}, fmt.Errorf("read tree entry")
-	}
-	object.ExpectedSize -= uint64(len(modeAndName))
-	modeAndName = modeAndName[:len(modeAndName)-1]
-	mode, name, found := bytes.Cut(modeAndName, []byte{' '})
-	if !found {
-		return TreeEntry{}, fmt.Errorf("malformed tree entry, missing ' '")
-	}
-
-	hashBuf := make([]byte, 20)
-	n, err := io.ReadFull(object.Reader, hashBuf)
-	if err != nil {
-		return TreeEntry{}, fmt.Errorf("read tree entry hash")
-	}
-	if object.ExpectedSize < uint64(n) {
-		return TreeEntry{}, fmt.Errorf("tree entry exceeds expected size")
-	}
-	object.ExpectedSize -= uint64(n)
-
-	hash := hex.EncodeToString(hashBuf)
-
-	return TreeEntry{
-		hash: hash,
-		name: name,
-		mode: mode,
-	}, nil
-}
-
-func retrieveObjectKind(gitRepo, hash string) (Kind, error) {
-	objectPath, err := getObjectPath(gitRepo, hash)
-	if err != nil {
-		return 0, err
-	}
-
-	f, err := os.Open(objectPath)
-	if err != nil {
-		return 0, err
-	}
-	defer f.Close()
-
-	entryObject, err := ReadObject(f)
-	if err != nil {
-		return 0, err
-	}
-
-	return entryObject.Kind, nil
-}
-
-func writeTreeNode(obj TreeNode, w io.Writer, nameOnly bool) {
-	if nameOnly {
-		fmt.Fprintf(w, "%s\n", obj.name)
-	} else {
-		fmt.Fprintf(w, "%06s %s %s\t%s\n", obj.mode, obj.kind, obj.hash, obj.name)
-	}
 }

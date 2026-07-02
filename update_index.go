@@ -14,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+
+	"github.com/aaronbittel/ekko/internal/objects"
 )
 
 // The signature is { 'D', 'I', 'R', 'C' } (stands for "dircache")
@@ -64,9 +66,9 @@ func (cmd *UpdateIndexCmd) defineFlags() {
 		}
 
 		var (
-			mode          = parts[0]
-			objectHashHex = parts[1]
-			path          = parts[2]
+			mode = parts[0]
+			hash = parts[1]
+			path = parts[2]
 		)
 
 		cmd.cinfo = &cacheinfo{}
@@ -84,13 +86,7 @@ func (cmd *UpdateIndexCmd) defineFlags() {
 			return fmt.Errorf("invalid mode %q", parts[0])
 		}
 
-		objectSha, err := sha1FromString(objectHashHex)
-		if err != nil {
-			return fmt.Errorf("--cacheinfo cannot add %s", objectHashHex)
-
-		}
-		cmd.cinfo.object = objectSha
-
+		cmd.cinfo.oid = hash
 		cmd.cinfo.path = path
 
 		return nil
@@ -184,7 +180,7 @@ type indexEntry struct {
 	// This is the on-disk size from stat(2), truncated to 32-bit.
 	fileSize uint32
 	// Object name for the represented object
-	gitSha gitSha1
+	hash string
 
 	flags entryFlags
 	// always 0 for version 2 => omitted
@@ -198,8 +194,6 @@ type indexEntry struct {
 }
 
 type entryFlags uint16
-
-type gitSha1 [20]byte
 
 // gitTimestamp stores seconds and nanoseconds since the Unix epoch.
 type gitTimestamp struct {
@@ -225,7 +219,7 @@ const (
 	Theirs
 )
 
-func NewIndexEntry(path string, hash gitSha1, stat *syscall.Stat_t) *indexEntry {
+func NewIndexEntry(path string, hash string, stat *syscall.Stat_t) *indexEntry {
 	var entry indexEntry
 
 	entry.ctime.seconds = uint32(stat.Ctim.Sec)
@@ -251,7 +245,7 @@ func NewIndexEntry(path string, hash gitSha1, stat *syscall.Stat_t) *indexEntry 
 	entry.userID = stat.Uid
 	entry.groupID = stat.Gid
 	entry.fileSize = uint32(stat.Size)
-	entry.gitSha = hash
+	entry.hash = hash
 
 	// TODO: make this configurable
 	// assume valid: false
@@ -294,7 +288,12 @@ func (ie *indexEntry) Encode() []byte {
 	out = binary.BigEndian.AppendUint32(out, ie.userID)
 	out = binary.BigEndian.AppendUint32(out, ie.groupID)
 	out = binary.BigEndian.AppendUint32(out, ie.fileSize)
-	out = append(out, ie.gitSha[:]...)
+	hashBytes, err := hex.DecodeString(ie.hash)
+	if err != nil {
+		// TODO: fix this
+		panic(err)
+	}
+	out = append(out, hashBytes...)
 	out = binary.BigEndian.AppendUint16(out, uint16(ie.flags))
 	// extendedFlags always omitted in version 2
 	if ie.shouldSetExtendedFlags() {
@@ -321,7 +320,7 @@ func (ie *indexEntry) Decode(b []byte) (n int, err error) {
 	ie.userID = binary.BigEndian.Uint32(parser.readN(4))
 	ie.groupID = binary.BigEndian.Uint32(parser.readN(4))
 	ie.fileSize = binary.BigEndian.Uint32(parser.readN(4))
-	copy(ie.gitSha[:], parser.readN(20))
+	ie.hash = hex.EncodeToString(parser.readN(20))
 	ie.flags = entryFlags(binary.BigEndian.Uint16(parser.readN(2)))
 
 	filenameLen := ie.filenameLength()
@@ -356,9 +355,9 @@ func padding(size int) int {
 }
 
 type cacheinfo struct {
-	mode   gitMode
-	object gitSha1
-	path   string
+	mode gitMode
+	oid  string
+	path string
 }
 
 func runUpdateIndex(path string, cinfo *cacheinfo) error {
@@ -467,12 +466,18 @@ func buildIndexEntry(path string, stat *syscall.Stat_t) (*indexEntry, error) {
 	}
 	defer f.Close()
 
-	objSha1, err := computeObjectHash(path, typeBlob, f)
+	obj, err := objects.BlobFromReader(f)
 	if err != nil {
 		return nil, err
 	}
 
-	return NewIndexEntry(path, objSha1, stat), nil
+	hashBytes, err := obj.Write(io.Discard)
+	if err != nil {
+		return nil, err
+	}
+	hash := hex.EncodeToString(hashBytes)
+
+	return NewIndexEntry(path, hash, stat), nil
 }
 
 func buildIndexEntryFromCacheinfo(cinfo *cacheinfo) *indexEntry {
@@ -480,7 +485,7 @@ func buildIndexEntryFromCacheinfo(cinfo *cacheinfo) *indexEntry {
 
 	entry.mode = cinfo.mode
 	entry.path = cinfo.path
-	entry.gitSha = cinfo.object
+	entry.hash = cinfo.oid
 	entry.flags = entryFlags(min(len(cinfo.path), 0xFFF))
 
 	return &entry
@@ -516,20 +521,4 @@ func getFileStat(path string) (*syscall.Stat_t, error) {
 	}
 
 	return stat, nil
-}
-
-func sha1FromString(s string) (gitSha1, error) {
-	var out gitSha1
-
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		return out, err
-	}
-
-	if len(b) != 20 {
-		return out, fmt.Errorf("invalid sha1 length: %d", len(b))
-	}
-
-	copy(out[:], b)
-	return out, nil
 }

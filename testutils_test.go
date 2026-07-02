@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/hex"
 	"flag"
 	"io"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -18,36 +18,39 @@ func newTestFlagSet() *flag.FlagSet {
 	return fs
 }
 
+//lint:ignore U1000 useful helper
 func newTestGitDir(t *testing.T) string {
 	baseDir := t.TempDir()
 	gitDir := filepath.Join(baseDir, ".git/")
-	require.NoError(t, os.Mkdir(gitDir, 0700))
+	require.NoError(t, os.Mkdir(gitDir, 0755))
 	return gitDir
 }
 
-func newTestSha1(t *testing.T, s string) gitSha1 {
-	var out gitSha1
-
-	b, err := hex.DecodeString(s)
-	require.NoError(t, err)
-
-	if len(b) != 20 {
-		t.Fatalf("invalid sha1 length: %d", len(b))
-	}
-
-	copy(out[:], b)
-	return out
-}
-
-func newSeededSha(t *testing.T, id int) gitSha1 {
+func newSeededHash(t *testing.T, id int) string {
 	t.Helper()
 
 	r := rand.New(rand.NewSource(int64(id)))
 
-	var sha gitSha1
-	for i := range len(sha) {
-		sha[i] = byte(r.Intn(256))
+	var sb strings.Builder
+	for range 40 {
+		sb.WriteByte(byte(r.Intn(256)))
 	}
 
-	return sha
+	return sb.String()
+}
+
+func changeIntoTestDir(t *testing.T) string {
+	t.Helper()
+
+	oldDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	baseDir := t.TempDir()
+	require.NoError(t, os.Chdir(baseDir))
+
+	t.Cleanup(func() {
+		os.Chdir(oldDir)
+	})
+
+	return baseDir
 }

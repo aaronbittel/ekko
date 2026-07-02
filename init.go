@@ -84,7 +84,7 @@ func initRepo(w io.Writer) error {
 	}
 
 	headFile := filepath.Join(gitdir, "HEAD")
-	if err := os.WriteFile(headFile, []byte("ref: refs/heads/main"), 0664); err != nil {
+	if err := os.WriteFile(headFile, []byte("ref: refs/heads/main\n"), 0664); err != nil {
 		return err
 	}
 

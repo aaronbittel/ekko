@@ -1,16 +1,16 @@
 package main
 
 import (
-	"bytes"
-	"compress/zlib"
-	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+
+	"github.com/aaronbittel/ekko/internal/objects"
 )
 
 const (
@@ -79,120 +79,74 @@ func (cmd *HashObjectCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
+	gitRepo, err := findGitRepo()
+	if err != nil {
+		return err
+	}
+
+	store := objects.NewStore(filepath.Join(gitRepo, ".git", "objects"))
+
 	if cmd.useStdin {
-		hash, err := HashObject(cmd.writeObject, os.Stdin)
+		hash, err := cmd.process(store, os.Stdin)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(w, hex.EncodeToString(hash))
+		fmt.Fprintln(w, hash)
 		return nil
 	}
 
 	if cmd.fs.NArg() == 0 {
 		cmd.fs.Usage()
-		fmt.Fprintln(cmd.fs.Output(), "to write hash an object either use '--stdin' or provide file(s)")
+		return errors.New("use --stdin or provide file(s)")
 	}
 
 	for i := range cmd.fs.NArg() {
-		path := cmd.fs.Arg(i)
-		f, err := os.Open(path)
-		if err != nil {
-			return fmt.Errorf("open file %q: %w", path, err)
-		}
-		hash, err := HashObject(cmd.writeObject, f)
+		// Use an anonymous function so defer closes each file at the end of its
+		// iteration, rather than at the end of the enclosing function.
+		err := func() error {
+			path := cmd.fs.Arg(i)
+			f, err := os.Open(path)
+			if err != nil {
+				return fmt.Errorf("open file %q: %w", path, err)
+			}
+			defer f.Close()
+
+			hash, err := cmd.process(store, f)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprintln(w, hash)
+			return nil
+		}()
+
 		if err != nil {
 			return err
-		}
-		fmt.Fprintln(w, hex.EncodeToString(hash))
-
-		if err := f.Close(); err != nil {
-			return fmt.Errorf("close file %q: %w", path, err)
 		}
 	}
 
 	return nil
 }
 
-func HashObject(write bool, r io.Reader) (hash []byte, err error) {
-	object, err := BlobFromFile(r)
+func (cmd *HashObjectCmd) process(store objects.Store, r io.Reader) (hash string, err error) {
+	obj, err := objects.BlobFromReader(r)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
+	defer obj.Close()
 
-	if write {
-		hash, err = object.WriteToObjects()
+	if cmd.writeObject {
+		hash, err = store.Write(obj)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 	} else {
-		hash, _ = object.Write(io.Discard)
+		hashBytes, err := obj.Write(io.Discard)
+		if err != nil {
+			return "", err
+		}
+		hash = hex.EncodeToString(hashBytes)
 	}
 
 	return hash, nil
-}
-
-func runHashObject(r io.Reader, gitObjectType string, writeObject bool) (objectID []byte, err error) {
-	objectData, err := buildObjectData(r, gitObjectType)
-	if err != nil {
-		return nil, err
-	}
-
-	hash := sha1.Sum(objectData)
-	objectID = hash[:]
-
-	// TODO: could make the other path (not writing) just take an io.Discard
-	if writeObject {
-		objectIDStr := hex.EncodeToString(objectID)
-		dirname := objectIDStr[:2]
-		filename := objectIDStr[2:]
-
-		dirpath := filepath.Join(".git", "objects", dirname)
-		if err := os.Mkdir(dirpath, 0777); err != nil {
-			return nil, err
-		}
-
-		path := filepath.Join(dirpath, filename)
-
-		f, err := os.Create(path)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-
-		zr := zlib.NewWriter(f)
-		defer zr.Close()
-		zr.Write(objectData)
-	}
-
-	return objectID, nil
-}
-
-func computeObjectHash(path, objectType string, r io.Reader) (gitSha1, error) {
-	data, err := buildObjectData(r, objectType)
-	if err != nil {
-		return gitSha1{}, err
-	}
-
-	return sha1.Sum(data), nil
-}
-
-func buildObjectData(r io.Reader, objectType string) ([]byte, error) {
-	data, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-
-	switch objectType {
-	case typeBlob:
-		fmt.Fprintf(&buf, "blob %d\x00", len(data))
-		buf.Write(data)
-	case typeCommit, typeTree, typeTag:
-		return nil, fmt.Errorf("object type %q is not supported yet", objectType)
-	default:
-		return nil, fmt.Errorf("invalid object type %q", objectType)
-	}
-
-	return buf.Bytes(), nil
 }

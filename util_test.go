@@ -6,13 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aaronbittel/ekko/internal/objects"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetGitRepo(t *testing.T) {
 	t.Run("find parent dir", func(t *testing.T) {
-		baseDir := t.TempDir()
+		baseDir := changeIntoTestDir(t)
+
 		gitDir := filepath.Join(baseDir, ".git/")
 		require.NoError(t, os.Mkdir(gitDir, 0700))
 
@@ -30,7 +32,7 @@ func TestGetGitRepo(t *testing.T) {
 	})
 
 	t.Run("no git repo", func(t *testing.T) {
-		baseDir := t.TempDir()
+		baseDir := changeIntoTestDir(t)
 
 		p := filepath.Join(baseDir, "a", "b", "c")
 		require.NoError(t, os.MkdirAll(p, 0700))
@@ -46,7 +48,6 @@ func TestGetObjectPath(t *testing.T) {
 		name     string
 		files    []string
 		wantFile string
-		wantErr  error
 	}{
 		{
 			name:     "find exact",
@@ -74,13 +75,11 @@ func TestGetObjectPath(t *testing.T) {
 				)
 			}
 
-			got, err := getObjectPath(baseDir, "d6AA")
+			store := objects.NewStore(filepath.Join(gitRepo, "objects"))
+			got, err := store.GetObjectPath("d6AA")
 
-			assert.ErrorIs(t, err, tt.wantErr)
-			assert.Equal(t,
-				filepath.Join(objectsDir, tt.wantFile),
-				got,
-			)
+			assert.NoError(t, err)
+			assert.Equal(t, filepath.Join(objectsDir, tt.wantFile), got)
 		})
 	}
 }
@@ -112,7 +111,7 @@ func TestMinimalUniqueObjectPrefix(t *testing.T) {
 				inputs[i] = input + strings.Repeat("X", 38-len(input))
 			}
 
-			got := minimalUniqueObjectPrefix(inputs)
+			got := objects.MinimalUniqueObjectPrefix(inputs)
 
 			// invariant: each prefix must uniquely identify its object
 			for i, prefix := range got {

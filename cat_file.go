@@ -1,15 +1,13 @@
 package main
 
 import (
-	"bytes"
-	"compress/zlib"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"strconv"
-	"strings"
+	"path/filepath"
+
+	"github.com/aaronbittel/ekko/internal/objects"
 )
 
 var ErrBadFile = errors.New("bad file")
@@ -70,8 +68,8 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 	}
 
 	var (
-		expectedObjectKind Kind
-		err                error
+		expectedObjKind objects.Kind
+		err             error
 	)
 
 	if cmd.requireObjectType() {
@@ -85,7 +83,7 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 			cmd.fs.Usage()
 			return fmt.Errorf("object kind must be provided when no '-p' and no '-t' flags are used")
 		}
-		expectedObjectKind, err = ParseKind(kindInput)
+		expectedObjKind, err = objects.ParseKind(kindInput)
 		if err != nil {
 			return err
 		}
@@ -102,120 +100,45 @@ func (cmd *CatFileCmd) Run(w io.Writer, args ...string) error {
 		return err
 	}
 
-	objectPath, err := getObjectPath(gitRepo, hash)
+	store := objects.NewStore(filepath.Join(gitRepo, ".git", "objects"))
+
+	obj, err := store.Open(hash)
 	if err != nil {
 		return err
 	}
-
-	f, err := os.Open(objectPath)
-	if err != nil {
-		return fmt.Errorf("open git object %q: %w", objectPath, err)
-	}
-	defer f.Close()
-
-	object, err := ReadObject(f)
-	if err != nil {
-		return err
-	}
-
-	if cmd.requireObjectType() && expectedObjectKind != object.Kind {
-		return fmt.Errorf("expected object kind %q, got %q", expectedObjectKind, object.Kind)
-	}
+	defer obj.Close()
 
 	if cmd.showType {
-		fmt.Fprintln(w, object.Kind.String())
+		fmt.Fprintln(w, obj.Kind)
 		return nil
 	}
 
-	if cmd.prettyPrint && object.Kind == KindTree {
-		treeNodes, err := parseTreeObjects(gitRepo, object)
+	if cmd.requireObjectType() && expectedObjKind != obj.Kind {
+		return fmt.Errorf("expected object kind %q, got %q", expectedObjKind, obj.Kind)
+	}
+
+	if cmd.prettyPrint && obj.Kind == objects.KindTree {
+		treeEntries, err := obj.ParseAsTree()
 		if err != nil {
 			return err
 		}
 
-		for _, treeNode := range treeNodes {
-			writeTreeNode(treeNode, w, false)
+		for _, entry := range treeEntries {
+			fmt.Fprintln(w, entry.Pretty())
 		}
 
 		return nil
 	}
 
-	if _, err := io.CopyN(w, object.Reader, int64(object.ExpectedSize)); err != nil {
-		return fmt.Errorf("copy: %w", err)
+	if _, err := obj.WriteTo(w); err != nil {
+		return err
 	}
 
 	return nil
 }
 
-func loadGitObject(gitRepo, objectName string) (objectType, content string, err error) {
-	path, err := getObjectPath(gitRepo, objectName)
-	if err != nil {
-		return "", "", err
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return "", "", err
-	}
-	defer f.Close()
-
-	content, err = decompressObject(f)
-	if err != nil {
-		return "", "", err
-	}
-
-	return getObjectType(content)
-}
 func (cfg CatFileCmd) requireObjectType() bool {
 	return !cfg.prettyPrint && !cfg.showType
-}
-
-func getObjectType(content string) (typ, rest string, err error) {
-	typ, rest, found := strings.Cut(content, " ")
-	if !found {
-		return "", "", ErrBadFile
-	}
-
-	switch typ {
-	case typeBlob, typeTree, typeTag, typeCommit:
-		return typ, rest, nil
-	default:
-		return "", "", fmt.Errorf("unknown object info %q", typ)
-	}
-}
-
-func decompressObject(r io.Reader) (string, error) {
-	zr, err := zlib.NewReader(r)
-	if err != nil {
-		return "", err
-	}
-	defer zr.Close()
-
-	buf := new(bytes.Buffer)
-
-	if _, err := io.Copy(buf, zr); err != nil {
-		return "", err
-	}
-
-	return buf.String(), nil
-}
-
-func readBlob(content string) (string, error) {
-	sizeStr, rest, found := strings.Cut(content, "\x00")
-	if !found {
-		return "", ErrBadFile
-	}
-
-	size, err := strconv.Atoi(sizeStr)
-	if err != nil {
-		return "", ErrBadFile
-	}
-
-	if len(rest) != size {
-		return "", ErrBadFile
-	}
-
-	return rest, nil
 }
 
 // Returns the next positional argument "" empty string, if none provided or arguments
